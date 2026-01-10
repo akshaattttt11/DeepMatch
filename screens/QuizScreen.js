@@ -7,7 +7,7 @@ import ConfettiCannon from 'react-native-confetti-cannon';
 import LottieWrapper from '../components/lottie/LottieWrapper';
 
 // API Configuration
-const API_BASE_URL = 'http://10.167.73.132:5000';
+const API_BASE_URL = 'http://10.185.247.132:5000';
 
 const { width, height } = Dimensions.get('window');
 const QUIZ_STORAGE_KEY = 'user_quiz_results';
@@ -174,7 +174,7 @@ const categories = [
 ];
 
 function getRandomQuestions() {
-  // Pick 1 random question from each category
+  // Pick 1 random question from each category (as originally designed)
   return categories.map(cat => {
     const idx = Math.floor(Math.random() * cat.questions.length);
     return { ...cat.questions[idx], type: cat.type };
@@ -182,70 +182,121 @@ function getRandomQuestions() {
 }
 
 // Calculation functions for quiz results
-function calculateMBTI(answers) {
-  const mbtiAnswers = answers.filter((_, idx) => idx < 10); // First 10 are MBTI
-  const counts = { E: 0, I: 0, S: 0, N: 0, T: 0, F: 0, J: 0, P: 0 };
-  
-  mbtiAnswers.forEach(answer => {
-    if (counts.hasOwnProperty(answer)) {
-      counts[answer]++;
+// Note: Quiz shows 5 questions (1 from each category), so answers array has 5 elements
+function calculateMBTI(answers, quizQuestions) {
+  // Find the MBTI question and its answer (single letter: E, I, S, N, T, F, J, or P)
+  let mbtiIdx = -1;
+  quizQuestions.forEach((q, idx) => {
+    if (q.type === 'MBTI' && mbtiIdx === -1) {
+      mbtiIdx = idx;
     }
   });
   
-  return `${counts.E > counts.I ? 'E' : 'I'}${counts.S > counts.N ? 'S' : 'N'}${counts.T > counts.F ? 'T' : 'F'}${counts.J > counts.P ? 'J' : 'P'}`;
+  if (mbtiIdx === -1 || !answers[mbtiIdx]) return 'I'; // Default fallback (single letter)
+  
+  const singleLetter = answers[mbtiIdx];
+  
+  // Return the single letter as-is - the backend will handle compatibility scoring
+  // with single letters using simpler logic (60-75 range based on complementarity)
+  return singleLetter;
 }
 
-function calculateEnneagram(answers) {
-  const enneagramAnswers = answers.slice(10, 20); // Next 10 are Enneagram
-  const counts = { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0, '6': 0, '7': 0, '8': 0, '9': 0 };
-  
-  enneagramAnswers.forEach(answer => {
-    if (counts.hasOwnProperty(answer)) {
-      counts[answer]++;
+function calculateEnneagram(answers, quizQuestions) {
+  // Find the Enneagram question and its answer
+  let enneagramIdx = -1;
+  quizQuestions.forEach((q, idx) => {
+    if (q.type === 'Enneagram' && enneagramIdx === -1) {
+      enneagramIdx = idx;
     }
   });
   
-  const maxType = Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b);
-  return `Type ${maxType}`;
+  if (enneagramIdx === -1 || !answers[enneagramIdx]) return 'Type 9'; // Default fallback
+  
+  const answer = answers[enneagramIdx];
+  // The answer should be the type number (e.g., '1', '2', '9')
+  return answer ? `Type ${answer}` : 'Type 9';
 }
 
-function calculateLoveLanguage(answers) {
-  const loveLangAnswers = answers.slice(20, 30); // Next 10 are Love Language
-  const counts = { 'Words': 0, 'Touch': 0, 'Time': 0, 'Service': 0, 'Gifts': 0 };
-  
-  loveLangAnswers.forEach(answer => {
-    if (counts.hasOwnProperty(answer)) {
-      counts[answer]++;
+function calculateLoveLanguage(answers, quizQuestions) {
+  // Find the Love Language question and its answer
+  let loveLangIdx = -1;
+  quizQuestions.forEach((q, idx) => {
+    if (q.type === 'Love Language' && loveLangIdx === -1) {
+      loveLangIdx = idx;
     }
   });
   
-  return Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b);
-}
-
-function calculatePsychologicalTraits(answers) {
-  const psychAnswers = answers.slice(30, 50); // Last 20 are Psychological
-  const traits = {
-    openness: 0,
-    conscientiousness: 0,
-    extraversion: 0,
-    agreeableness: 0,
-    neuroticism: 0
+  if (loveLangIdx === -1 || !answers[loveLangIdx]) return 'Words of Affirmation'; // Default fallback
+  
+  const answer = answers[loveLangIdx];
+  // Map answer values to full love language names
+  const loveLangMap = {
+    'Words': 'Words of Affirmation',
+    'Touch': 'Physical Touch',
+    'Time': 'Quality Time',
+    'Service': 'Acts of Service',
+    'Gifts': 'Receiving Gifts'
   };
   
-  // Simple scoring based on answers
-  psychAnswers.forEach((answer, idx) => {
-    if (answer === 'Yes' || answer === 'Plan' || answer === 'Logic' || answer === 'Honesty') {
-      traits.openness += 2;
-      traits.conscientiousness += 2;
-      traits.extraversion += 1;
-      traits.agreeableness += 1;
-      traits.neuroticism -= 1;
+  return loveLangMap[answer] || answer || 'Words of Affirmation';
+}
+
+function calculatePsychologicalTraits(answers, quizQuestions) {
+  // Find the Psychological question and its answer
+  let psychIdx = -1;
+  quizQuestions.forEach((q, idx) => {
+    if (q.type === 'Psychological' && psychIdx === -1) {
+      psychIdx = idx;
     }
   });
+  
+  if (psychIdx === -1 || !answers[psychIdx]) {
+    // Return default traits if no answer
+    return {
+      openness: 50,
+      conscientiousness: 50,
+      extraversion: 50,
+      agreeableness: 50,
+      neuroticism: 50
+    };
+  }
+  
+  const answer = answers[psychIdx];
+  const traits = {
+    openness: 50,
+    conscientiousness: 50,
+    extraversion: 50,
+    agreeableness: 50,
+    neuroticism: 50
+  };
+  
+  // Score based on the answer - add some variation
+  // This is a simplified scoring since we only have 1 psychological question
+  if (answer === 'Yes') {
+    traits.openness += 20;
+    traits.conscientiousness += 10;
+    traits.extraversion += 15;
+  } else if (answer === 'No') {
+    traits.openness -= 10;
+    traits.conscientiousness += 15;
+    traits.extraversion -= 10;
+  } else if (answer === 'Plan') {
+    traits.conscientiousness += 25;
+    traits.openness += 5;
+  } else if (answer === 'Spontaneous') {
+    traits.openness += 25;
+    traits.conscientiousness -= 10;
+  } else if (answer === 'Logic') {
+    traits.openness += 15;
+    traits.conscientiousness += 20;
+  } else if (answer === 'Emotions') {
+    traits.agreeableness += 20;
+    traits.extraversion += 15;
+  }
   
   // Normalize to 0-100 scale
   Object.keys(traits).forEach(key => {
-    traits[key] = Math.max(0, Math.min(100, traits[key] * 2));
+    traits[key] = Math.max(0, Math.min(100, traits[key]));
   });
   
   return traits;
@@ -389,75 +440,83 @@ export default function QuizScreen({ navigation }) {
     ).start();
   }, []);
 
-  const handleAnswer = async (answer, idx) => {
-    // Button bounce (transform: true)
-    Animated.sequence([
-      Animated.spring(answerAnims[idx], { toValue: 1.2, useNativeDriver: true }),
-      Animated.spring(answerAnims[idx], { toValue: 1, useNativeDriver: true }),
-    ]).start();
 
-    setTimeout(() => {
-      if (current < quizQuestions.length - 1) {
-        setAnswers([...answers, answer]);
-        setCurrent(current + 1);
-      } else {
-        // Last question, show calculating
-        const allAnswers = [...answers, answer];
-        setAnswers(allAnswers);
-        setCalculating(true);
-        setTimeout(async () => {
-          await AsyncStorage.setItem(QUIZ_STORAGE_KEY, JSON.stringify(allAnswers));
-          
-          // Submit quiz results to backend
-          try {
-            const token = await AsyncStorage.getItem('auth_token');
-            const response = await fetch(`${API_BASE_URL}/api/quiz/submit`, {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                mbti_type: calculateMBTI(allAnswers),
-                enneagram_type: calculateEnneagram(allAnswers),
-                love_language: calculateLoveLanguage(allAnswers),
-                psychological_traits: calculatePsychologicalTraits(allAnswers),
-                zodiac_sign: 'Aries', // This would come from ZodiacQuizScreen
-                zodiac_answers: {}
-              })
-            });
-            
-            if (response.ok) {
-              console.log('Quiz submitted successfully');
-            }
-          } catch (error) {
-            console.error('Error submitting quiz:', error);
-          }
-          
-          setCalculating(false);
-          // Calculate a random score for demo (replace with real logic)
-          const randomScore = Math.floor(60 + Math.random() * 40);
-          setScore(randomScore);
-          setShowScore(true);
-          setShowConfetti(true);
-          scoreAnim.setValue(0);
-          Animated.parallel([
-            Animated.timing(scoreAnim, {
-              toValue: 1,
-              duration: 1200,
-              useNativeDriver: true,
-              easing: Easing.bounce,
-            }),
-          ]).start(() => {
-            setTimeout(() => {
-              setShowConfetti(false);
-              navigation.replace('MainTabs');
-            }, 2000);
-          });
-        }, 1800);
+  const handleAnswer = async (answer, idx) => {
+  // ⛔ If already calculating, do nothing
+  if (calculating) return;
+
+  Animated.sequence([
+    Animated.spring(answerAnims[idx], { toValue: 1.2, useNativeDriver: true }),
+    Animated.spring(answerAnims[idx], { toValue: 1, useNativeDriver: true }),
+  ]).start();
+
+  // ✅ LAST QUESTION — HARD STOP HERE
+  if (current === quizQuestions.length - 1) {
+    setCalculating(true);
+
+    const allAnswers = [...answers, answer];
+    setAnswers(allAnswers);
+
+    // 🔥 EXIT IMMEDIATELY — NO MORE CODE BELOW RUNS
+    setTimeout(async () => {
+      await AsyncStorage.setItem(QUIZ_STORAGE_KEY, JSON.stringify(allAnswers));
+
+      try {
+        const token = await AsyncStorage.getItem('auth_token');
+        // Get zodiac sign from AsyncStorage if zodiac quiz was completed
+        const zodiacSign = await AsyncStorage.getItem('user_zodiac_sign') || null;
+        
+        await fetch(`${API_BASE_URL}/api/quiz/submit`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            mbti_type: calculateMBTI(allAnswers, quizQuestions),
+            enneagram_type: calculateEnneagram(allAnswers, quizQuestions),
+            love_language: calculateLoveLanguage(allAnswers, quizQuestions),
+            psychological_traits: calculatePsychologicalTraits(allAnswers, quizQuestions),
+            zodiac_sign: zodiacSign, // Use zodiac from zodiac quiz, or null if not taken
+            zodiac_answers: {},
+          }),
+        });
+      } catch (error) {
+        console.error('Error submitting quiz:', error);
       }
-    }, 250);
-  };
+
+      await AsyncStorage.setItem('hasTakenZodiacQuiz', 'true');
+
+      setCalculating(false);
+
+      const randomScore = Math.floor(60 + Math.random() * 40);
+      setScore(randomScore);
+      setShowScore(true);
+      setShowConfetti(true);
+
+      scoreAnim.setValue(0);
+      Animated.timing(scoreAnim, {
+      toValue: 1,
+      duration: 1200,
+      useNativeDriver: true,
+      easing: Easing.bounce,
+      }).start(() => {
+    setTimeout(() => {
+    setShowConfetti(false);
+    navigation.replace('MainTabs'); // ✅ GO HOME
+  }, 2000);
+});
+    }, 1200);
+
+    return; 
+  }
+
+  setTimeout(() => {
+    setAnswers([...answers, answer]);
+    setCurrent(current + 1);
+  }, 250);
+};
+
 
   // Animated dots for calculating
   const dots = [0, 1, 2].map(i => (
@@ -598,6 +657,7 @@ export default function QuizScreen({ navigation }) {
     );
   }
 
+
   return (
     <SafeAreaView style={styles.container}>
       <Background />
@@ -634,6 +694,8 @@ export default function QuizScreen({ navigation }) {
           <Animated.View
             style={{
               opacity: cardAnim,
+              width: width * 0.9,
+              alignSelf: 'center',
               transform: [
                 { scale: cardAnim.interpolate({ inputRange: [0, 1], outputRange: [0.95, 1] }) },
                 { translateY: cardAnim.interpolate({ inputRange: [0, 1], outputRange: [40, 0] }) },
@@ -646,14 +708,16 @@ export default function QuizScreen({ navigation }) {
               {q && q.answers && q.answers.map((a, idx) => (
                 <Animated.View
                   key={a.value}
-                  style={{
-                    opacity: answerAnims[idx] || 1,
-                    transform: [
-                      { translateY: answerAnims[idx] ? answerAnims[idx].interpolate({ inputRange: [0, 1], outputRange: [30, 0] }) : 0 },
-                      { scale: answerAnims[idx] || 1 }
-                    ],
-                    width: '100%',
-                  }}
+                  style={[
+                    styles.answerWrapper,
+                    {
+                      opacity: answerAnims[idx] || 1,
+                      transform: [
+                        { translateY: answerAnims[idx] ? answerAnims[idx].interpolate({ inputRange: [0, 1], outputRange: [30, 0] }) : 0 },
+                        { scale: answerAnims[idx] || 1 }
+                      ],
+                    },
+                  ]}
                 >
                   <Pressable
                     style={({ pressed }) => [
@@ -717,10 +781,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: '100%',
   },
+  answerWrapper: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   answerBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    alignSelf: 'center',
     backgroundColor: '#23232b',
     borderRadius: 16,
     paddingVertical: 16,

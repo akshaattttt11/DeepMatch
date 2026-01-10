@@ -31,7 +31,7 @@ export default function LoginScreen({ navigation }) {
     setLoading(true);
     try {
       // Use your Flask backend
-      const response = await fetch('http://10.167.73.132:5000/api/login', {
+      const response = await fetch('http://10.185.247.132:5000/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
@@ -118,7 +118,9 @@ export default function LoginScreen({ navigation }) {
         {loading ? (
           <ActivityIndicator size="small" color="#fff" style={{ marginVertical: 10 }} />
         ) : (
-          <Button title="Login" onPress={handleLogin} disabled={loading} />
+          <TouchableOpacity style={styles.loginButton} onPress={handleLogin} disabled={loading}>
+            <Text style={styles.loginButtonText}>Login</Text>
+          </TouchableOpacity>
         )}
         <View style={styles.signupRow}>
           <Text style={styles.signupText}>Don't have an account? </Text>
@@ -182,9 +184,22 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   signupLink: {
-    color: '#fff',
+    color: '#10b981',
     fontSize: 15,
     textDecorationLine: 'underline',
     fontWeight: 'bold',
+  },
+  loginButton: {
+    backgroundColor: '#10b981',
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    borderRadius: 10,
+    marginTop: 10,
+  },
+  loginButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
+    textTransform: 'uppercase',
   },
 }); 

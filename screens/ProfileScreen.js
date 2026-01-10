@@ -1,10 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, Modal, TextInput, Animated, Easing, Dimensions, SafeAreaView, Alert, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { View, Text, StyleSheet, Image, TouchableOpacity, Modal, TextInput, Animated, Easing, Dimensions, SafeAreaView, Alert, ActivityIndicator, KeyboardAvoidingView, ScrollView, Platform, FlatList } from 'react-native';
+import { Picker } from '@react-native-picker/picker';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import simpleService from '../services/simpleService';
+import { disconnectSocket } from '../services/socket';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { getVerifiedLocation } from '../utils/locationService';
 
 const { width } = Dimensions.get('window');
 
@@ -17,6 +22,7 @@ const initialProfile = {
   first_name: '',
   last_name: '',
   age: '',
+  height: '',
   location: '',
   bio: '',
   mbti: '',
@@ -28,7 +34,73 @@ const initialProfile = {
   looking_for: '',
   min_age: '',
   max_age: '',
+  dating_intention: '',
 };
+
+const MBTI_OPTIONS = [
+  'INTJ','INTP','ENTJ','ENTP',
+  'INFJ','INFP','ENFJ','ENFP',
+  'ISTJ','ISFJ','ESTJ','ESFJ',
+  'ISTP','ISFP','ESTP','ESFP',
+];
+
+const ENNEAGRAM_OPTIONS = [
+  { value: '1', label: '1 – Reformer' },
+  { value: '2', label: '2 – Helper' },
+  { value: '3', label: '3 – Achiever' },
+  { value: '4', label: '4 – Individualist' },
+  { value: '5', label: '5 – Investigator' },
+  { value: '6', label: '6 – Loyalist' },
+  { value: '7', label: '7 – Enthusiast' },
+  { value: '8', label: '8 – Challenger' },
+  { value: '9', label: '9 – Peacemaker' },
+];
+
+const LOVE_LANGUAGE_OPTIONS = [
+  'Words of Affirmation',
+  'Acts of Service',
+  'Receiving Gifts',
+  'Quality Time',
+  'Physical Touch',
+];
+
+const ZODIAC_OPTIONS = [
+  'Aries','Taurus','Gemini','Cancer','Leo','Virgo',
+  'Libra','Scorpio','Sagittarius','Capricorn','Aquarius','Pisces',
+];
+
+const DATING_INTENTION_OPTIONS = [
+  'Long Term',
+  'Short Term',
+  'Casual',
+];
+
+const GENDER_OPTIONS = [
+  'male',
+  'female',
+];
+
+// Generate height options from 4'9" to 7'0" (in inches)
+const HEIGHT_OPTIONS = [];
+for (let feet = 4; feet <= 7; feet++) {
+  const minInches = feet === 4 ? 9 : 0;
+  const maxInches = feet === 7 ? 0 : 11;
+  for (let inches = minInches; inches <= maxInches; inches++) {
+    const totalInches = feet * 12 + inches;
+    const label = `${feet}'${inches}"`;
+    HEIGHT_OPTIONS.push({ value: totalInches, label: label });
+  }
+}
+
+// Helper function to convert inches to feet'inches" format
+const inchesToFeetInches = (inches) => {
+  if (!inches) return '';
+  const feet = Math.floor(inches / 12);
+  const remainingInches = inches % 12;
+  return `${feet}'${remainingInches}"`;
+};
+
+const PICKER_ITEM_COLOR = Platform.OS === 'ios' ? '#ffffff' : '#111827';
 
 const badgeDataKeys = [
   { label: 'MBTI', key: 'mbti', icon: 'planet-outline' },
@@ -50,6 +122,14 @@ export default function ProfileScreen() {
   const [editAnim] = useState(new Animated.Value(0));
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [gettingLocation, setGettingLocation] = useState(false);
+  const [photoModal, setPhotoModal] = useState(false);
+  const [photos, setPhotos] = useState([]);
+  const [zoomModal, setZoomModal] = useState(false);
+  const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const currentImageIndexRef = useRef(0);
+  const imageViewerFlatListRef = useRef(null);
 
   // Initialize services and load profile
   useEffect(() => {
@@ -115,6 +195,13 @@ export default function ProfileScreen() {
         console.log('✅ Loaded profile:', formattedProfile);
         setProfile(formattedProfile);
         setEditProfile(formattedProfile);
+        if (formattedProfile.photos && formattedProfile.photos.length > 0) {
+          setPhotos(formattedProfile.photos);
+        } else if (formattedProfile.profile_picture) {
+          setPhotos([formattedProfile.profile_picture]);
+        } else {
+          setPhotos([]);
+        }
         return;
       }
       
@@ -148,6 +235,7 @@ export default function ProfileScreen() {
       first_name: backendProfile.first_name || '',
       last_name: backendProfile.last_name || '',
       age: backendProfile.age ? String(backendProfile.age) : '',
+      height: backendProfile.height || '', // Height stored as "5'11"" format
       location: backendProfile.location || '',
       bio: backendProfile.bio || '',
       mbti: backendProfile.mbti || '',
@@ -155,10 +243,12 @@ export default function ProfileScreen() {
       loveLanguage: backendProfile.love_language || '',
       zodiac: backendProfile.zodiac_sign || '',
       profile_picture: backendProfile.profile_picture || '',
+      photos: backendProfile.photos || [],
       gender: backendProfile.gender || '',
       looking_for: backendProfile.looking_for || '',
       min_age: backendProfile.min_age ? String(backendProfile.min_age) : '',
       max_age: backendProfile.max_age ? String(backendProfile.max_age) : '',
+      dating_intention: backendProfile.dating_intention || '',
     };
   };
 
@@ -167,17 +257,22 @@ export default function ProfileScreen() {
       first_name: displayProfile.first_name,
       last_name: displayProfile.last_name,
       age: displayProfile.age ? parseInt(displayProfile.age) : null,
+      height: displayProfile.height || null, // Height stored as "5'11"" format
       location: displayProfile.location,
+      latitude: displayProfile.latitude || null,
+      longitude: displayProfile.longitude || null,
       bio: displayProfile.bio,
       mbti: displayProfile.mbti,
       enneagram_type: displayProfile.enneagram ? parseInt(displayProfile.enneagram) : null,
       love_language: displayProfile.loveLanguage,
       zodiac_sign: displayProfile.zodiac,
       profile_picture: displayProfile.profile_picture,
+      photos: displayProfile.photos || [],
       gender: displayProfile.gender,
       looking_for: displayProfile.looking_for,
       min_age: displayProfile.min_age ? parseInt(displayProfile.min_age) : 18,
       max_age: displayProfile.max_age ? parseInt(displayProfile.max_age) : 100,
+      dating_intention: displayProfile.dating_intention || null,
     };
   };
 
@@ -196,6 +291,188 @@ export default function ProfileScreen() {
     setModalVisible(true);
   };
 
+  useEffect(() => {
+    // hydrate photo slots from profile picture if available
+    if (profile.profile_picture) {
+      setPhotos(prev => {
+        if (prev.length === 0) return [profile.profile_picture];
+        if (prev[0] !== profile.profile_picture) {
+          const copy = [...prev];
+          copy[0] = profile.profile_picture;
+          return copy;
+        }
+        return prev;
+      });
+    }
+  }, [profile.profile_picture]);
+
+  // Scroll to initial index when modal opens
+  useEffect(() => {
+    if (zoomModal && imageViewerFlatListRef.current && currentImageIndex >= 0) {
+      setTimeout(() => {
+        try {
+          imageViewerFlatListRef.current?.scrollToIndex({
+            index: currentImageIndex,
+            animated: false,
+          });
+        } catch (error) {
+          // Fallback to scrollToOffset if scrollToIndex fails
+          imageViewerFlatListRef.current?.scrollToOffset({
+            offset: currentImageIndex * width,
+            animated: false,
+          });
+        }
+      }, 100);
+    }
+  }, [zoomModal, currentImageIndex]);
+
+
+  // Stable header component - memoized to prevent unnecessary re-renders
+  const ZoomHeader = React.useMemo(() => {
+    const HeaderComponent = ({ imageIndex }) => {
+      const handleEditPhoto = async () => {
+        try {
+          const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            allowsEditing: true,
+            aspect: [4, 5],
+            quality: 1,
+          });
+          
+          if (!result.canceled && result.assets[0]) {
+            const uri = result.assets[0].uri;
+            const updatedPhotos = [...photos];
+            const currentActualIndex = photos.findIndex((p, i) => {
+              const countBefore = photos.slice(0, i).filter(Boolean).length;
+              return p && countBefore === imageIndex;
+            });
+            if (currentActualIndex >= 0) {
+              updatedPhotos[currentActualIndex] = uri;
+              setPhotos(updatedPhotos);
+              
+              // Update main photo if it's the first slot
+              if (currentActualIndex === 0) {
+                setProfile(prev => ({ ...prev, profile_picture: uri }));
+                setEditProfile(prev => ({ ...prev, profile_picture: uri }));
+              }
+              
+              Alert.alert('Success', 'Photo updated successfully!');
+            }
+          }
+        } catch (error) {
+          console.error('Failed to update photo:', error);
+          Alert.alert('Error', 'Failed to update photo. Please try again.');
+        }
+      };
+
+      return (
+        <View style={styles.zoomHeader}>
+          <TouchableOpacity
+            style={styles.zoomCloseButton}
+            onPress={() => setZoomModal(false)}
+          >
+            <Ionicons name="close" size={28} color="#fff" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.zoomEditButton}
+            onPress={handleEditPhoto}
+          >
+            <Ionicons name="create-outline" size={24} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      );
+    };
+    return React.memo(HeaderComponent);
+  }, [photos]);
+
+  // Stable footer component - memoized to prevent unnecessary re-renders
+  const ZoomFooter = React.useMemo(() => {
+    const FooterComponent = ({ imageIndex }) => {
+      const validPhotosCount = photos.filter(Boolean).length;
+      if (validPhotosCount <= 1) return null;
+      
+      return (
+        <View style={styles.photoIndicator}>
+          <Text style={styles.photoIndicatorText}>
+            {imageIndex + 1} / {validPhotosCount}
+          </Text>
+        </View>
+      );
+    };
+    return React.memo(FooterComponent);
+  }, [photos]);
+
+  // Callback for image index change - update ref and state
+  const handleImageIndexChange = useCallback((index) => {
+    // Update ref immediately (no re-render)
+    currentImageIndexRef.current = index;
+    // Update state immediately - the memoized components should handle this efficiently
+    setCurrentImageIndex(index);
+  }, []);
+
+  // Memoized callback for closing zoom modal
+  const handleZoomModalClose = useCallback(() => {
+    // Sync selectedPhotoIndex with current image when closing
+    const validPhotos = photos.filter(Boolean);
+    if (currentImageIndex >= 0 && currentImageIndex < validPhotos.length) {
+      const actualIndex = photos.findIndex((p, i) => {
+        const countBefore = photos.slice(0, i).filter(Boolean).length;
+        return p && countBefore === currentImageIndex;
+      });
+      if (actualIndex >= 0) {
+        setSelectedPhotoIndex(actualIndex);
+      }
+    }
+    setZoomModal(false);
+  }, [photos, currentImageIndex]);
+
+  const handleAddPhoto = async (slotIndex = 0) => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [4, 5],
+        quality: 1,
+      });
+      if (!result.canceled) {
+        const uri = result.assets[0].uri;
+        setPhotos(prev => {
+          const copy = [...prev];
+          while (copy.length < 6) copy.push(null);
+          copy[slotIndex] = uri;
+          return copy;
+        });
+        if (slotIndex === 0) {
+          setProfile(prev => ({ ...prev, profile_picture: uri }));
+          setEditProfile(prev => ({ ...prev, profile_picture: uri }));
+        }
+      }
+    } catch (error) {
+      console.error('Failed to add photo:', error);
+      Alert.alert('Error', 'Failed to add photo. Please try again.');
+    }
+  };
+
+  const handleSavePhotos = async () => {
+    try {
+      const cleanedPhotos = photos.filter(Boolean);
+      const main = cleanedPhotos[0] || profile.profile_picture || '';
+      const updatedProfile = {
+        ...profile,
+        profile_picture: main,
+        photos: cleanedPhotos,
+      };
+      setProfile(updatedProfile);
+      setEditProfile(prev => ({ ...prev, profile_picture: main, photos: cleanedPhotos }));
+      await simpleService.updateProfile(formatProfileForBackend(updatedProfile));
+      setPhotoModal(false);
+      Alert.alert('Saved', 'Photos saved successfully.');
+    } catch (error) {
+      console.error('Failed to save photos:', error);
+      Alert.alert('Error', 'Could not save photos. Please try again.');
+    }
+  };
+
   const closeEditModal = () => {
     setModalVisible(false);
     setTimeout(() => setIsBlurred(false), 300);
@@ -209,8 +486,8 @@ export default function ProfileScreen() {
       console.log('💾 Saving profile for user:', currentUser);
       console.log('📊 Profile data:', editProfile);
       
-      // Format profile for backend
-      const backendProfile = formatProfileForBackend(editProfile);
+      const mainPhoto = (photos.filter(Boolean)[0]) || editProfile.profile_picture || profile.profile_picture || '';
+      const backendProfile = formatProfileForBackend({ ...editProfile, profile_picture: mainPhoto, photos });
       console.log('📤 Formatted profile for save:', backendProfile);
       
       // Update profile using simple service
@@ -218,7 +495,25 @@ export default function ProfileScreen() {
       console.log('✅ Save result:', result);
       
       // Update local state
-      setProfile(editProfile);
+      const updatedProfile = { ...editProfile, profile_picture: mainPhoto, photos };
+      setProfile(updatedProfile);
+      setEditProfile(updatedProfile);
+      
+      // Update currentUser in AsyncStorage with gender so HomeScreen can filter correctly
+      try {
+        const currentUserData = await AsyncStorage.getItem('current_user');
+        if (currentUserData) {
+          const currentUser = JSON.parse(currentUserData);
+          const updatedUser = {
+            ...currentUser,
+            gender: editProfile.gender || currentUser.gender
+          };
+          await AsyncStorage.setItem('current_user', JSON.stringify(updatedUser));
+        }
+      } catch (error) {
+        console.error('Error updating current_user:', error);
+      }
+      
       closeEditModal();
       
       Alert.alert('Success', 'Profile updated successfully!');
@@ -254,6 +549,9 @@ export default function ProfileScreen() {
         Animated.timing(logoutAnim, { toValue: 1, duration: 400, useNativeDriver: true }),
         Animated.timing(logoutAnim, { toValue: 0, duration: 400, useNativeDriver: true }),
       ]).start();
+
+      // 🔴 CLOSE SOCKET CONNECTION
+      disconnectSocket();
       
       // Clear session data (but keep profile)
       await simpleService.clearData();
@@ -331,6 +629,30 @@ export default function ProfileScreen() {
   const displayLocation = profile.location || 'Location';
   const displayBio = profile.bio || 'Tell us about yourself...';
 
+  // Completion calculation: all details + photo slots
+  const details = [
+    profile.first_name,
+    profile.last_name,
+    profile.age,
+    profile.location,
+    profile.bio,
+    profile.mbti,
+    profile.enneagram,
+    profile.loveLanguage,
+    profile.zodiac,
+    profile.profile_picture,
+  ];
+  const detailsFilled = details.filter(Boolean).length;
+  const detailsTotal = details.length;
+
+  const photosFilled = (photos.filter(Boolean).length || (profile.profile_picture ? 1 : 0));
+  const photosTotal = 6;
+
+  const completionPercent = Math.min(
+    100,
+    Math.round(((detailsFilled + photosFilled) / (detailsTotal + photosTotal)) * 100)
+  );
+
   return (
     <SafeAreaView style={styles.container}>
       {isBlurred && (
@@ -339,6 +661,20 @@ export default function ProfileScreen() {
       <View style={styles.header}>
         <Text style={styles.headerText}>My Profile</Text>
       </View>
+      <View style={styles.progressContainer}>
+        <View style={styles.progressRow}>
+          <Text style={styles.progressLabel}>Profile completion</Text>
+          <Text style={styles.progressValue}>{completionPercent}%</Text>
+        </View>
+        <View style={styles.progressBarBackground}>
+          <LinearGradient
+            colors={['#d1d5db', '#9ca3af']}
+            start={{ x: 0, y: 0.5 }}
+            end={{ x: 1, y: 0.5 }}
+            style={[styles.progressBarFill, { width: `${completionPercent}%` }]}
+          />
+        </View>
+      </View>
       <Animated.View
         style={{
           alignItems: 'center',
@@ -346,7 +682,7 @@ export default function ProfileScreen() {
           transform: [{ scale: picAnim.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] }) }],
         }}
       >
-        <TouchableOpacity onPress={openEditModal} activeOpacity={0.8}>
+        <TouchableOpacity onPress={() => setPhotoModal(true)} activeOpacity={0.8}>
           <Image source={{ uri: profile.profile_picture || placeholderPhoto }} style={styles.profilePic} />
           <View style={styles.editPicIcon}>
             <Ionicons name="camera" size={22} color="#fff" />
@@ -366,6 +702,123 @@ export default function ProfileScreen() {
           </View>
         ))}
       </Animated.View>
+      {/* Photo Grid Modal */}
+      <Modal
+        visible={photoModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setPhotoModal(false)}
+      >
+        <View style={styles.photoModalOverlay}>
+          <View style={styles.photoModalContent}>
+            <View style={styles.photoModalHeader}>
+              <Text style={styles.photoModalTitle}>Add your photos</Text>
+              <TouchableOpacity onPress={() => setPhotoModal(false)}>
+                <Ionicons name="close" size={22} color="#111" />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.photoGrid}>
+              {Array.from({ length: 6 }).map((_, idx) => {
+                const uri = photos[idx] || null;
+                return (
+                  <TouchableOpacity
+                    key={idx}
+                    style={styles.photoSlot}
+                    activeOpacity={0.85}
+                    onPress={() => {
+                      if (uri) {
+                        // Open zoom modal if photo exists
+                        setSelectedPhotoIndex(idx);
+                        // Calculate the index in the filtered array
+                        const validPhotos = photos.filter(Boolean);
+                        const photoIndex = photos.slice(0, idx + 1).filter(Boolean).length - 1;
+                        currentImageIndexRef.current = photoIndex;
+                        setCurrentImageIndex(photoIndex);
+                        setZoomModal(true);
+                      } else {
+                        // Add photo if slot is empty
+                        handleAddPhoto(idx);
+                      }
+                    }}
+                  >
+                    {uri ? (
+                      <>
+                        <Image source={{ uri }} style={styles.photoSlotImage} />
+                        {idx === 0 && <Text style={styles.mainPhotoTag}>Main photo</Text>}
+                      </>
+                    ) : (
+                      <View style={styles.addIconWrap}>
+                        <Ionicons name="add" size={26} color="#111" />
+                        <Text style={styles.addText}>Add</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <TouchableOpacity style={styles.photoDoneBtn} onPress={handleSavePhotos}>
+              <Text style={styles.photoDoneText}>Save photos</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Custom Photo Viewing Modal - smooth swipe, no zoom */}
+      <Modal
+        visible={zoomModal}
+        transparent={true}
+        animationType="fade"
+        statusBarTranslucent={true}
+        onRequestClose={handleZoomModalClose}
+      >
+        <View style={styles.imageViewerContainer}>
+          {/* Header */}
+          <ZoomHeader imageIndex={currentImageIndex} />
+          
+          {/* Image FlatList */}
+          <FlatList
+            ref={imageViewerFlatListRef}
+            data={photos.filter(Boolean)}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            keyExtractor={(item, index) => `photo-${index}`}
+            getItemLayout={(data, index) => ({
+              length: width,
+              offset: width * index,
+              index,
+            })}
+            onScrollToIndexFailed={(info) => {
+              // Fallback to scrollToOffset if scrollToIndex fails
+              setTimeout(() => {
+                imageViewerFlatListRef.current?.scrollToOffset({
+                  offset: info.index * width,
+                  animated: false,
+                });
+              }, 100);
+            }}
+            onMomentumScrollEnd={(event) => {
+              const index = Math.round(event.nativeEvent.contentOffset.x / width);
+              if (index >= 0 && index < photos.filter(Boolean).length) {
+                handleImageIndexChange(index);
+              }
+            }}
+            renderItem={({ item }) => (
+              <View style={styles.imageViewerItem}>
+                <Image
+                  source={{ uri: item }}
+                  style={styles.imageViewerImage}
+                  resizeMode="contain"
+                />
+              </View>
+            )}
+          />
+          
+          {/* Footer */}
+          <ZoomFooter imageIndex={currentImageIndex} />
+        </View>
+      </Modal>
+
       <Animated.View style={[styles.editButtonContainer, { opacity: editAnim, transform: [{ scale: editAnim }] }]}>
         <TouchableOpacity style={styles.editButton} onPress={openEditModal} activeOpacity={0.85}>
           <MaterialIcons name="edit" size={24} color="#fff" />
@@ -398,96 +851,204 @@ export default function ProfileScreen() {
         onRequestClose={closeEditModal}
       >
         <View style={styles.modalOverlay}>
-          <Animated.View style={styles.modalContent}>
-            <TouchableOpacity onPress={pickImage} style={{ alignSelf: 'center', marginBottom: 16 }}>
-              <Image source={{ uri: editProfile.profile_picture || placeholderPhoto }} style={styles.editProfilePic} />
-              <View style={styles.editPicIconModal}>
-                <Ionicons name="camera" size={22} color="#fff" />
-              </View>
-            </TouchableOpacity>
-            <TextInput
-              style={styles.input}
-              value={editProfile.first_name}
-              onChangeText={first_name => setEditProfile({ ...editProfile, first_name })}
-              placeholder="First Name"
-              placeholderTextColor="#a3a3a3"
-            />
-            <TextInput
-              style={styles.input}
-              value={editProfile.last_name}
-              onChangeText={last_name => setEditProfile({ ...editProfile, last_name })}
-              placeholder="Last Name"
-              placeholderTextColor="#a3a3a3"
-            />
-            <TextInput
-              style={styles.input}
-              value={String(editProfile.age)}
-              onChangeText={age => setEditProfile({ ...editProfile, age })}
-              placeholder="Age"
-              keyboardType="numeric"
-              placeholderTextColor="#a3a3a3"
-            />
-            <TextInput
-              style={styles.input}
-              value={editProfile.location}
-              onChangeText={location => setEditProfile({ ...editProfile, location })}
-              placeholder="Location"
-              placeholderTextColor="#a3a3a3"
-            />
-            <TextInput
-              style={[styles.input, { height: 70 }]}
-              value={editProfile.bio}
-              onChangeText={bio => setEditProfile({ ...editProfile, bio })}
-              placeholder="Bio"
-              multiline
-              placeholderTextColor="#a3a3a3"
-            />
-            <TextInput
-              style={styles.input}
-              value={editProfile.mbti}
-              onChangeText={mbti => setEditProfile({ ...editProfile, mbti })}
-              placeholder="MBTI"
-              placeholderTextColor="#a3a3a3"
-            />
-            <TextInput
-              style={styles.input}
-              value={editProfile.enneagram}
-              onChangeText={enneagram => setEditProfile({ ...editProfile, enneagram })}
-              placeholder="Enneagram (1-9)"
-              keyboardType="numeric"
-              placeholderTextColor="#a3a3a3"
-            />
-            <TextInput
-              style={styles.input}
-              value={editProfile.loveLanguage}
-              onChangeText={loveLanguage => setEditProfile({ ...editProfile, loveLanguage })}
-              placeholder="Love Language"
-              placeholderTextColor="#a3a3a3"
-            />
-            <TextInput
-              style={styles.input}
-              value={editProfile.zodiac}
-              onChangeText={zodiac => setEditProfile({ ...editProfile, zodiac })}
-              placeholder="Zodiac Sign"
-              placeholderTextColor="#a3a3a3"
-            />
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 }}>
-              <TouchableOpacity 
-                style={[styles.saveButton, saving && styles.saveButtonDisabled]} 
-                onPress={handleSave}
-                disabled={saving}
-              >
-                {saving ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={styles.saveButtonText}>Save</Text>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.cancelButton} onPress={closeEditModal}>
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-          </Animated.View>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 0} style={{ flex: 1 }}>
+            <Animated.View style={styles.modalContent}>
+              <ScrollView contentContainerStyle={styles.modalScroll} keyboardShouldPersistTaps="handled">
+                <TouchableOpacity onPress={pickImage} style={{ alignSelf: 'center', marginBottom: 16 }}>
+                  <Image source={{ uri: editProfile.profile_picture || placeholderPhoto }} style={styles.editProfilePic} />
+                  <View style={styles.editPicIconModal}>
+                    <Ionicons name="camera" size={22} color="#fff" />
+                  </View>
+                </TouchableOpacity>
+                <TextInput
+                  style={styles.input}
+                  value={editProfile.first_name}
+                  onChangeText={first_name => setEditProfile({ ...editProfile, first_name })}
+                  placeholder="First Name"
+                  placeholderTextColor="#a3a3a3"
+                />
+                <TextInput
+                  style={styles.input}
+                  value={editProfile.last_name}
+                  onChangeText={last_name => setEditProfile({ ...editProfile, last_name })}
+                  placeholder="Last Name"
+                  placeholderTextColor="#a3a3a3"
+                />
+                <TextInput
+                  style={styles.input}
+                  value={String(editProfile.age)}
+                  onChangeText={age => setEditProfile({ ...editProfile, age })}
+                  placeholder="Age"
+                  keyboardType="numeric"
+                  placeholderTextColor="#a3a3a3"
+                />
+                <Text style={styles.pickerLabel}>Gender</Text>
+                <View style={styles.pickerContainer}>
+                  <Picker
+                    selectedValue={editProfile.gender || ''}
+                    onValueChange={(gender) => setEditProfile({ ...editProfile, gender: gender || '' })}
+                    style={styles.picker}
+                    dropdownIconColor="#10b981"
+                    mode="dropdown"
+                  >
+                    <Picker.Item label="Select gender" value="" color="#a3a3a3" />
+                    <Picker.Item label="Male" value="male" color={PICKER_ITEM_COLOR} />
+                    <Picker.Item label="Female" value="female" color={PICKER_ITEM_COLOR} />
+                  </Picker>
+                </View>
+                <Text style={styles.pickerLabel}>Height</Text>
+                <View style={styles.pickerContainer}>
+                  <Picker
+                    selectedValue={editProfile.height || null}
+                    onValueChange={(heightStr) => setEditProfile({ ...editProfile, height: heightStr || '' })}
+                    style={styles.picker}
+                    dropdownIconColor="#10b981"
+                    mode="dropdown"
+                  >
+                    <Picker.Item label="Select height" value={null} color="#a3a3a3" />
+                    {HEIGHT_OPTIONS.map((option) => (
+                      <Picker.Item key={option.value} label={option.label} value={option.label} color={PICKER_ITEM_COLOR} />
+                    ))}
+                  </Picker>
+                </View>
+                <View style={styles.locationInputContainer}>
+                  <TextInput
+                    style={styles.locationInput}
+                    value={editProfile.location}
+                    onChangeText={location => setEditProfile({ ...editProfile, location })}
+                    placeholder="Location"
+                    placeholderTextColor="#a3a3a3"
+                  />
+                  <TouchableOpacity
+                    style={styles.locationButton}
+                    onPress={async () => {
+                      try {
+                        setGettingLocation(true);
+                        const verified = await getVerifiedLocation();
+                        setEditProfile({
+                          ...editProfile,
+                          location: verified.location,
+                          latitude: verified.latitude,
+                          longitude: verified.longitude,
+                        });
+                        Alert.alert('Location Verified', `Location set to: ${verified.location}`);
+                      } catch (error) {
+                        Alert.alert('Error', error.message || 'Failed to get location. Please enable location permissions.');
+                      } finally {
+                        setGettingLocation(false);
+                      }
+                    }}
+                    disabled={gettingLocation}
+                  >
+                    {gettingLocation ? (
+                      <ActivityIndicator size="small" color="#10b981" />
+                    ) : (
+                      <Ionicons name="locate" size={20} color="#10b981" />
+                    )}
+                  </TouchableOpacity>
+                </View>
+                <TextInput
+                  style={[styles.input, { height: 70 }]}
+                  value={editProfile.bio}
+                  onChangeText={bio => setEditProfile({ ...editProfile, bio })}
+                  placeholder="Bio"
+                  multiline
+                  placeholderTextColor="#a3a3a3"
+                />
+                <Text style={styles.pickerLabel}>Dating Intention</Text>
+                <View style={styles.pickerContainer}>
+                  <Picker
+                    selectedValue={editProfile.dating_intention || ''}
+                    onValueChange={(dating_intention) => setEditProfile({ ...editProfile, dating_intention })}
+                    style={styles.picker}
+                    dropdownIconColor="#10b981"
+                    mode="dropdown"
+                  >
+                    <Picker.Item label="Select dating intention" value="" color="#a3a3a3" />
+                    {DATING_INTENTION_OPTIONS.map((option) => (
+                      <Picker.Item key={option} label={option} value={option} color={PICKER_ITEM_COLOR} />
+                    ))}
+                  </Picker>
+                </View>
+                <Text style={styles.pickerLabel}>MBTI Type</Text>
+                <View style={styles.pickerContainer}>
+                  <Picker
+                    selectedValue={editProfile.mbti || ''}
+                    onValueChange={(mbti) => setEditProfile({ ...editProfile, mbti })}
+                    style={styles.picker}
+                    dropdownIconColor="#10b981"
+                    mode="dropdown"
+                  >
+                    <Picker.Item label="Select MBTI type" value="" color="#a3a3a3" />
+                    {MBTI_OPTIONS.map((type) => (
+                      <Picker.Item key={type} label={type} value={type} color={PICKER_ITEM_COLOR} />
+                    ))}
+                  </Picker>
+                </View>
+                <Text style={styles.pickerLabel}>Enneagram</Text>
+                <View style={styles.pickerContainer}>
+                  <Picker
+                    selectedValue={editProfile.enneagram || ''}
+                    onValueChange={(enneagram) => setEditProfile({ ...editProfile, enneagram })}
+                    style={styles.picker}
+                    dropdownIconColor="#10b981"
+                    mode="dropdown"
+                  >
+                    <Picker.Item label="Select Enneagram type" value="" color="#a3a3a3" />
+                    {ENNEAGRAM_OPTIONS.map((option) => (
+                      <Picker.Item key={option.value} label={option.label} value={option.value} color={PICKER_ITEM_COLOR} />
+                    ))}
+                  </Picker>
+                </View>
+                <Text style={styles.pickerLabel}>Love Language</Text>
+                <View style={styles.pickerContainer}>
+                  <Picker
+                    selectedValue={editProfile.loveLanguage || ''}
+                    onValueChange={(loveLanguage) => setEditProfile({ ...editProfile, loveLanguage })}
+                    style={styles.picker}
+                    dropdownIconColor="#10b981"
+                    mode="dropdown"
+                  >
+                    <Picker.Item label="Select love language" value="" color="#a3a3a3" />
+                    {LOVE_LANGUAGE_OPTIONS.map((option) => (
+                      <Picker.Item key={option} label={option} value={option} color={PICKER_ITEM_COLOR} />
+                    ))}
+                  </Picker>
+                </View>
+                <Text style={styles.pickerLabel}>Zodiac Sign</Text>
+                <View style={styles.pickerContainer}>
+                  <Picker
+                    selectedValue={editProfile.zodiac || ''}
+                    onValueChange={(zodiac) => setEditProfile({ ...editProfile, zodiac })}
+                    style={styles.picker}
+                    dropdownIconColor="#10b981"
+                    mode="dropdown"
+                  >
+                    <Picker.Item label="Select zodiac sign" value="" color="#a3a3a3" />
+                    {ZODIAC_OPTIONS.map((sign) => (
+                      <Picker.Item key={sign} label={sign} value={sign} color={PICKER_ITEM_COLOR} />
+                    ))}
+                  </Picker>
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 }}>
+                  <TouchableOpacity 
+                    style={[styles.saveButton, saving && styles.saveButtonDisabled]} 
+                    onPress={handleSave}
+                    disabled={saving}
+                  >
+                    {saving ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Text style={styles.saveButtonText}>Save</Text>
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.cancelButton} onPress={closeEditModal}>
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
+            </Animated.View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
     </SafeAreaView>
@@ -657,16 +1218,66 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 12,
   },
-  input: {
+  modalScroll: {
+    paddingBottom: 24,
+  },
+  locationInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12, // Match input marginBottom
+    gap: 8, // Space between input and button
+  },
+  locationInput: {
+    flex: 1,
+    height: 48, // Match input height exactly
     backgroundColor: '#18181b',
     color: '#fff',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 12,
     fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#27272a',
+  },
+  locationButton: {
+    width: 48,
+    height: 48, // Match input height exactly
+    borderRadius: 12, // Match input border radius exactly
+    backgroundColor: '#27272a',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#10b981',
+  },
+  input: {
+    backgroundColor: '#18181b',
+    color: '#fff',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    height: 48, // Match location button height
+    fontSize: 16,
     marginBottom: 12,
     borderWidth: 1,
     borderColor: '#27272a',
+  },
+  pickerLabel: {
+    color: '#d4d4d8',
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 4,
+    marginBottom: 6,
+  },
+  pickerContainer: {
+    backgroundColor: '#18181b',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#27272a',
+    marginBottom: 12,
+  },
+  picker: {
+    color: '#fff',
+    width: '100%',
   },
   saveButton: {
     backgroundColor: '#10b981',
@@ -714,5 +1325,226 @@ const styles = StyleSheet.create({
     padding: 3,
     borderWidth: 2,
     borderColor: '#23232b',
+  },
+  photoModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  photoModalContent: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: '#f7f7f7',
+    borderRadius: 20,
+    padding: 18,
+  },
+  photoModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  photoModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111',
+  },
+  photoGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    rowGap: 12,
+    marginTop: 8,
+  },
+  photoSlot: {
+    width: '31%',
+    aspectRatio: 3 / 4,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#dcdcdc',
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoSlotImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  mainPhotoTag: {
+    position: 'absolute',
+    bottom: 6,
+    left: 6,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    color: '#fff',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    fontSize: 12,
+    overflow: 'hidden',
+  },
+  addIconWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  addText: {
+    fontSize: 14,
+    color: '#111',
+    fontWeight: '600',
+  },
+  photoDoneBtn: {
+    marginTop: 16,
+    backgroundColor: '#111',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  photoDoneText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 16,
+  },
+  progressContainer: {
+    width: '90%',
+    alignSelf: 'center',
+    marginTop: 16,
+    marginBottom: 18, // gap before avatar
+  },
+  progressRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  progressLabel: {
+    color: '#e5e5e5',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  progressValue: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  progressBarBackground: {
+    height: 12,
+    borderRadius: 10,
+    backgroundColor: '#1f1f24',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#2d2d34',
+  },
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 10,
+    shadowColor: '#d1d5db',
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 6,
+  },
+  zoomModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  zoomHeader: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 50 : 40,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    zIndex: 10,
+  },
+  zoomCloseButton: {
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 20,
+    padding: 8,
+  },
+  zoomEditButton: {
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 20,
+    padding: 8,
+  },
+  zoomImageContainer: {
+    width: width,
+    height: Dimensions.get('window').height,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  zoomScrollView: {
+    width: width,
+    height: Dimensions.get('window').height,
+  },
+  zoomImageContent: {
+    width: width,
+    minHeight: Dimensions.get('window').height,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  zoomImageWrapper: {
+    width: width,
+    height: Dimensions.get('window').height,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  zoomImage: {
+    width: width,
+    height: Dimensions.get('window').height,
+  },
+  photoIndicator: {
+    position: 'absolute',
+    bottom: Platform.OS === 'ios' ? 50 : 40,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  photoIndicatorText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  zoomHeaderOverlay: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 50 : 40,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    zIndex: 1000,
+  },
+  photoIndicatorOverlay: {
+    position: 'absolute',
+    bottom: Platform.OS === 'ios' ? 50 : 40,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    zIndex: 1000,
+  },
+  imageViewerContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.95)',
+  },
+  imageViewerItem: {
+    width: width,
+    height: Dimensions.get('window').height,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageViewerImage: {
+    width: width,
+    height: Dimensions.get('window').height,
   },
 }); 

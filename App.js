@@ -14,6 +14,7 @@ import SignupScreen from './screens/SignupScreen';
 import MatchesScreen from './screens/MatchesScreen';
 import TipsScreen from './screens/TipsScreen';
 import ZodiacQuizScreen from './screens/ZodiacQuizScreen';
+import ProfileDetailScreen from './screens/ProfileDetailScreen';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -54,6 +55,7 @@ export default function App() {
         <Stack.Screen name="Quiz" component={QuizScreen} />
         <Stack.Screen name="ZodiacQuiz" component={ZodiacQuizScreen} />
         <Stack.Screen name="MainTabs" component={MainTabs} options={{ gestureEnabled: false }} />
+        <Stack.Screen name="ProfileDetail" component={ProfileDetailScreen} />
       </Stack.Navigator>
     </NavigationContainer>
     );

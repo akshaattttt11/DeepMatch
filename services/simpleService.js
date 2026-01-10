@@ -108,9 +108,9 @@ class SimpleService {
       // Try to sync with backend if online
       if (this.isOnline) {
         try {
-          // Temporarily disabled backend sync for testing
-          // await this.syncToBackend(profileData);
-          console.log('✅ SimpleService: Profile saved locally (backend sync disabled)');
+          const result = await this.syncToBackend(profileData);
+          console.log('✅ SimpleService: Profile saved and synced to backend');
+          return result;
         } catch (error) {
           console.log('⚠️ SimpleService: Backend sync failed, data saved locally');
         }
@@ -225,12 +225,19 @@ class SimpleService {
   // BACKEND SYNC
   async syncToBackend(data) {
     try {
+      // Get authentication token from AsyncStorage
+      const token = await AsyncStorage.getItem('auth_token');
+      
+      if (!token) {
+        throw new Error('No authentication token found. Please login again.');
+      }
+      
       // Simple backend sync - you can customize this
-      // Replace 'YOUR_COMPUTER_IP' with your actual IP address (e.g., '192.168.1.100')
-      const response = await fetch('http://YOUR_COMPUTER_IP:5000/api/profile', {
+      const response = await fetch('http://10.185.247.132:5000/api/profile', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify(data),
       });

@@ -4,6 +4,7 @@ import { Ionicons, FontAwesome } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import ConfettiCannon from 'react-native-confetti-cannon';
 import LottieWrapper from '../components/lottie/LottieWrapper';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // 1. Import all zodiac icon components at the top:
 import AriesIcon from '../components/zodiac/AriesIcon';
@@ -21,6 +22,8 @@ import PiscesIcon from '../components/zodiac/PiscesIcon';
 
 const { width, height } = Dimensions.get('window');
 const ZODIAC_QUIZ_STORAGE_KEY = 'user_zodiac_quiz_results';
+const COMPATIBLE_ZODIAC_KEY = 'user_compatible_zodiac';
+const API_BASE_URL = 'http://10.185.247.132:5000';
 
 const zodiacQuestions = [
   { question: 'What is your zodiac sign?', answers: [ { text: 'Aries', value: 'Aries' }, { text: 'Taurus', value: 'Taurus' }, { text: 'Gemini', value: 'Gemini' }, { text: 'Cancer', value: 'Cancer' }, { text: 'Leo', value: 'Leo' }, { text: 'Virgo', value: 'Virgo' }, { text: 'Libra', value: 'Libra' }, { text: 'Scorpio', value: 'Scorpio' }, { text: 'Sagittarius', value: 'Sagittarius' }, { text: 'Capricorn', value: 'Capricorn' }, { text: 'Aquarius', value: 'Aquarius' }, { text: 'Pisces', value: 'Pisces' } ] },
@@ -165,21 +168,6 @@ export default function ZodiacQuizScreen({ navigation }) {
   const scoreAnim = useRef(new Animated.Value(0)).current;
   const [answerAnims, setAnswerAnims] = useState([]);
 
-  // 2. Add compatibility matrix and state for compatible sign:
-  const zodiacCompatibility = {
-    Aries: 'Leo',
-    Taurus: 'Scorpio',
-    Gemini: 'Libra',
-    Cancer: 'Pisces',
-    Leo: 'Sagittarius',
-    Virgo: 'Capricorn',
-    Libra: 'Gemini',
-    Scorpio: 'Taurus',
-    Sagittarius: 'Aries',
-    Capricorn: 'Taurus',
-    Aquarius: 'Gemini',
-    Pisces: 'Virgo',
-  };
   const [compatibleSign, setCompatibleSign] = useState(null);
   const animatedZodiacScale = useRef(new Animated.Value(1)).current;
 
@@ -259,35 +247,116 @@ export default function ZodiacQuizScreen({ navigation }) {
         setAnswers([...answers, answer]);
         setCurrent(current + 1);
       } else {
-        // Last question, show calculating
+        // Last question, show calculating and send answers to backend
         const allAnswers = [...answers, answer];
         setAnswers(allAnswers);
         setCalculating(true);
-        setTimeout(() => {
-          setCalculating(false);
-          // Get user's sign from answers[0]
-          const userSign = allAnswers[0];
-          const compatible = zodiacCompatibility[userSign] || 'Leo';
-          setCompatibleSign(compatible);
-          // Calculate a random score for demo (replace with real logic)
-          const randomScore = Math.floor(60 + Math.random() * 40);
-          setScore(randomScore);
-          setShowScore(true);
-          setShowConfetti(true);
-          scoreAnim.setValue(0);
-          Animated.parallel([
-            Animated.timing(scoreAnim, {
-              toValue: 1,
-              duration: 1200,
-              useNativeDriver: true,
-              easing: Easing.bounce,
-            })
-          ]).start(() => {
-            setTimeout(() => {
+        setTimeout(async () => {
+          try {
+            // User's own zodiac sign is the first answer
+            const userSign = allAnswers[0];
+            let compatible = null;
+
+            try {
+              const token = await AsyncStorage.getItem('auth_token');
+              if (token) {
+                const response = await fetch(`${API_BASE_URL}/api/zodiac-quiz`, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    zodiac_sign: userSign,
+                    answers: allAnswers,
+                  }),
+                });
+
+                if (response.ok) {
+                  const data = await response.json();
+                  compatible = data.compatible_sign || null;
+                } else {
+                  console.error('Zodiac quiz submit failed with status:', response.status);
+                }
+              }
+            } catch (err) {
+              console.error('Error sending zodiac quiz to backend:', err);
+            }
+
+            if (!compatible) {
+              // Fallback if backend did not return anything
+              compatible = 'Leo';
+            }
+
+            setCompatibleSign(compatible);
+
+            // Save zodiac sign and compatible sign locally for filters on HomeScreen
+            try {
+              await AsyncStorage.setItem(
+                COMPATIBLE_ZODIAC_KEY,
+                JSON.stringify({ userSign, compatible })
+              );
+              // Also save user's zodiac sign separately for quiz submission
+              await AsyncStorage.setItem('user_zodiac_sign', userSign);
+            } catch (err) {
+              console.error('Error saving compatible zodiac locally:', err);
+            }
+
+            // Also keep original quiz answers if needed later
+            try {
+              await AsyncStorage.setItem(
+                ZODIAC_QUIZ_STORAGE_KEY,
+                JSON.stringify(allAnswers)
+              );
+            } catch (err) {
+              console.error('Error saving zodiac quiz answers locally:', err);
+            }
+
+            // Show score / animation exactly as before
+            const randomScore = Math.floor(60 + Math.random() * 40);
+            setScore(randomScore);
+            setShowScore(true);
+            setShowConfetti(true);
+            scoreAnim.setValue(0);
+            Animated.parallel([
+              Animated.timing(scoreAnim, {
+                toValue: 1,
+                duration: 1200,
+                useNativeDriver: true,
+                easing: Easing.bounce,
+              })
+            ]).start(() => {
+              setTimeout(() => {
               setShowConfetti(false);
-              navigation.replace('MainTabs');
-            }, 4000); // Give more time to view the animation
-          });
+
+  AsyncStorage.setItem('hasTakenZodiacQuiz', 'true');
+
+  (async () => {
+    try {
+      const token = await AsyncStorage.getItem('auth_token');
+      if (token) {
+        await fetch(`${API_BASE_URL}/api/zodiac-quiz/complete`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+      }
+    } catch (err) {
+      console.error('Failed to sync zodiac quiz completion:', err);
+    }
+  })();
+  navigation.replace('MainTabs');
+}, 4000);
+
+ // Give more time to view the animation
+            });
+            // Now that result is visible, we can safely turn off calculating
+            setCalculating(false);
+          } catch (err) {
+            console.error('Unexpected error in zodiac quiz completion:', err);
+            setCalculating(false);
+          }
         }, 1800);
       }
     }, 250);
@@ -334,69 +403,7 @@ export default function ZodiacQuizScreen({ navigation }) {
     Pisces: PiscesIcon,
   };
 
-  if (quizQuestions.length === 0) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <Background />
-        <FloatingShapes parallax={1} />
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color="#bdbdbd" />
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  if (calculating) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <Background />
-        <FloatingShapes parallax={1.2} />
-        <View style={styles.centered}>
-          {/* Morphing heart/circle */}
-          <Animated.View style={{
-            width: 60, 
-            height: 60,
-            borderRadius: 30,
-            backgroundColor: '#e0e0e0',
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginBottom: 20,
-            opacity: 0.15,
-            alignSelf: 'center',
-            transform: [{ scale: morphScale }]
-          }}>
-            <FontAwesome name="heart" size={36} color="#e0e0e0" style={{ opacity: 0.7 }} />
-          </Animated.View>
-          {/* Animated dots */}
-          <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }}>
-            <Text style={{ color: '#e0e0e0', fontSize: 32, fontWeight: 'bold' }}>Calculating</Text>
-            {dots}
-          </View>
-          {/* Progress circle */}
-          <Animated.View style={{
-            marginTop: 30,
-            width: 60,
-            height: 60,
-            borderRadius: 30,
-            borderWidth: 6,
-            borderColor: '#e0e0e0',
-            borderRightColor: 'transparent',
-            borderLeftColor: '#bdbdbd',
-            borderBottomColor: 'transparent',
-            alignSelf: 'center',
-            transform: [{
-              rotate: dotAnim.interpolate({
-                inputRange: [0, 3],
-                outputRange: ['0deg', '360deg']
-              })
-            }]
-          }} />
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  // 6. Replace the showScore block:
+  // 6. Show result FIRST so there's no flicker when switching from calculating
   if (showScore && compatibleSign) {
     const ZodiacIcon = zodiacAnimatedIcons[compatibleSign] || AriesIcon;
     return (
@@ -453,6 +460,69 @@ export default function ZodiacQuizScreen({ navigation }) {
     );
   }
 
+  if (calculating) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <Background />
+        <FloatingShapes parallax={1.2} />
+        <View style={styles.centered}>
+          {/* Morphing heart/circle */}
+          <Animated.View
+            style={{
+              width: 60,
+              height: 60,
+              borderRadius: 30,
+              backgroundColor: '#e0e0e0',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: 20,
+              opacity: 0.15,
+              alignSelf: 'center',
+              transform: [{ scale: morphScale }],
+            }}>
+            <FontAwesome name="heart" size={36} color="#e0e0e0" style={{ opacity: 0.7 }} />
+          </Animated.View>
+          {/* Animated dots */}
+          <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }}>
+            <Text style={{ color: '#e0e0e0', fontSize: 32, fontWeight: 'bold' }}>Calculating</Text>
+            {dots}
+          </View>
+          {/* Progress circle */}
+          <Animated.View style={{
+            marginTop: 30,
+            width: 60,
+            height: 60,
+            borderRadius: 30,
+            borderWidth: 6,
+            borderColor: '#e0e0e0',
+            borderRightColor: 'transparent',
+            borderLeftColor: '#bdbdbd',
+            borderBottomColor: 'transparent',
+            alignSelf: 'center',
+            transform: [{
+              rotate: dotAnim.interpolate({
+                inputRange: [0, 3],
+                outputRange: ['0deg', '360deg']
+              })
+            }]
+          }} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (quizQuestions.length === 0) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <Background />
+        <FloatingShapes parallax={1} />
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color="#bdbdbd" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <Background />
@@ -489,6 +559,8 @@ export default function ZodiacQuizScreen({ navigation }) {
           <Animated.View
             style={{
               opacity: cardAnim,
+              width: width * 0.9,
+              alignSelf: 'center',
               transform: [
                 { scale: cardAnim.interpolate({ inputRange: [0, 1], outputRange: [0.95, 1] }) },
                 { translateY: cardAnim.interpolate({ inputRange: [0, 1], outputRange: [40, 0] }) },
@@ -503,14 +575,16 @@ export default function ZodiacQuizScreen({ navigation }) {
                 {q && q.answers && q.answers.map((a, idx) => (
                   <Animated.View
                     key={a.value}
-                    style={{
-                      opacity: answerAnims[idx] || 1,
-                      transform: [
-                        { translateY: answerAnims[idx] ? answerAnims[idx].interpolate({ inputRange: [0, 1], outputRange: [30, 0] }) : 0 },
-                        { scale: answerAnims[idx] || 1 }
-                      ],
-                      width: '100%',
-                    }}
+                    style={[
+                      styles.answerWrapper,
+                      {
+                        opacity: answerAnims[idx] || 1,
+                        transform: [
+                          { translateY: answerAnims[idx] ? answerAnims[idx].interpolate({ inputRange: [0, 1], outputRange: [30, 0] }) : 0 },
+                          { scale: answerAnims[idx] || 1 }
+                        ],
+                      },
+                    ]}
                   >
                     <Pressable
                       style={({ pressed }) => [
@@ -531,14 +605,16 @@ export default function ZodiacQuizScreen({ navigation }) {
                 {q && q.answers && q.answers.map((a, idx) => (
                   <Animated.View
                     key={a.value}
-                    style={{
-                      opacity: answerAnims[idx] || 1,
-                      transform: [
-                        { translateY: answerAnims[idx] ? answerAnims[idx].interpolate({ inputRange: [0, 1], outputRange: [30, 0] }) : 0 },
-                        { scale: answerAnims[idx] || 1 }
-                      ],
-                      width: '100%',
-                    }}
+                    style={[
+                      styles.answerWrapper,
+                      {
+                        opacity: answerAnims[idx] || 1,
+                        transform: [
+                          { translateY: answerAnims[idx] ? answerAnims[idx].interpolate({ inputRange: [0, 1], outputRange: [30, 0] }) : 0 },
+                          { scale: answerAnims[idx] || 1 }
+                        ],
+                      },
+                    ]}
                   >
                     <Pressable
                       style={({ pressed }) => [
@@ -602,6 +678,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
+  },
+  answerWrapper: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   answerBtn: {
     flexDirection: 'row',
