@@ -1,6 +1,8 @@
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
+from flask_mail import Mail
+from flask_mail import Message as EmailMessage
 from werkzeug.security import generate_password_hash, check_password_hash
 import jwt
 from datetime import datetime, timedelta
@@ -8,6 +10,7 @@ import os
 import json
 import random
 import math
+import secrets
 from flask_socketio import SocketIO, emit, join_room, leave_room, rooms
 import pytz
 
@@ -32,6 +35,16 @@ try:
     from joblib import load as joblib_load
 except ImportError:
     joblib_load = None
+
+# NSFW Detection (optional - for image content filtering)
+try:
+    from nsfw_detector import scan_image_nsfw
+    print("✅ NSFW detection module loaded")
+except ImportError as e:
+    print(f"⚠️ NSFW detection not available: {e}")
+    # Fallback function - allows all uploads
+    def scan_image_nsfw(image_path, threshold=0.5):
+        return False, 0.0, {"error": "NSFW detection not available", "allowed": True, "note": "Install Pillow and numpy for basic detection"}
 
 # user_id -> socket_id
 connected_users = {}    
@@ -69,6 +82,17 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 CORS(app)  # Enable CORS for React Native
+
+# Email Configuration
+app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
+app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', 587))
+app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'True').lower() in ['true', '1', 'yes']
+app.config['MAIL_USE_SSL'] = os.environ.get('MAIL_USE_SSL', 'False').lower() in ['true', '1', 'yes']
+app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME', '')
+app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD', '')
+app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', app.config['MAIL_USERNAME'])
+
+mail = Mail(app)
 
 # Try to load a pre-trained zodiac model if present
 ZODIAC_SIGNS = [
@@ -190,6 +214,11 @@ class User(db.Model):
     # Enneagram and zodiac
     enneagram_type = db.Column(db.Integer)
     zodiac_sign = db.Column(db.String(20))
+    
+    # Email verification
+    is_verified = db.Column(db.Boolean, default=False, nullable=False)
+    email_verification_token = db.Column(db.String(100), unique=True, nullable=True)
+    verification_token_expiry = db.Column(db.DateTime, nullable=True)
 
 # Helper function to calculate distance between two coordinates using Haversine formula
 def calculate_distance(lat1, lon1, lat2, lon2):
@@ -317,6 +346,15 @@ class Message(db.Model):
     reactions = db.Column(db.Text, nullable=True)   # JSON
     reply_to = db.Column(db.Text, nullable=True)
 
+class MessageDelete(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    message_id = db.Column(db.Integer, db.ForeignKey('message.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint('message_id', 'user_id', name='unique_message_user_delete'),
+    )
+
 class Like(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     liker_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
@@ -353,6 +391,66 @@ def verify_token(token):
         return payload['user_id']
     except:
         return None
+
+# Helper function to generate email verification token
+def generate_verification_token():
+    """Generate a secure random token for email verification"""
+    return secrets.token_urlsafe(32)
+
+# Helper function to send verification email
+def send_verification_email(user_email, username, token):
+    """Send email verification link to user"""
+    try:
+        # Get the base URL from environment or use default
+        base_url = os.environ.get('APP_BASE_URL', 'http://10.82.196.132:5000')
+        verification_url = f"{base_url}/api/verify-email?token={token}"
+        
+        # Create email message - use EmailMessage alias to avoid conflict with SQLAlchemy Message model
+        msg = EmailMessage()
+        msg.recipients = [user_email]
+        msg.subject = 'Verify Your DeepMatch Account'
+        msg.html = f"""
+            <html>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <h2 style="color: #10b981;">Welcome to DeepMatch, {username}!</h2>
+                    <p>Thank you for signing up. Please verify your email address to activate your account.</p>
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="{verification_url}" 
+                           style="background-color: #10b981; color: white; padding: 12px 30px; 
+                                  text-decoration: none; border-radius: 5px; display: inline-block;">
+                            Verify Email Address
+                        </a>
+                    </div>
+                    <p>Or copy and paste this link into your browser:</p>
+                    <p style="word-break: break-all; color: #666;">{verification_url}</p>
+                    <p style="margin-top: 30px; font-size: 12px; color: #999;">
+                        This link will expire in 24 hours. If you didn't create an account, please ignore this email.
+                    </p>
+                </div>
+            </body>
+            </html>
+            """
+        msg.body = f"""
+Welcome to DeepMatch, {username}!
+
+Thank you for signing up. Please verify your email address by clicking the link below:
+
+{verification_url}
+
+This link will expire in 24 hours. If you didn't create an account, please ignore this email.
+
+Best regards,
+The DeepMatch Team
+            """
+        
+        mail.send(msg)
+        return True
+    except Exception as e:
+        print(f"Error sending verification email: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False
 
 # Compatibility Calculation Functions
 def calculate_mbti_compatibility(mbti1, mbti2):
@@ -537,6 +635,10 @@ def register():
     if User.query.filter_by(username=data['username']).first():
         return jsonify({'error': 'Username already taken'}), 400
     
+    # Generate verification token
+    verification_token = generate_verification_token()
+    token_expiry = datetime.utcnow() + timedelta(hours=24)
+    
     # Create new user
     user = User(
         username=data['username'],
@@ -551,24 +653,32 @@ def register():
         looking_for=data.get('looking_for', 'both'),
         min_age=data.get('min_age', 18),
         max_age=data.get('max_age', 100),
-        dating_intention=data.get('dating_intention')
+        dating_intention=data.get('dating_intention'),
+        is_verified=False,
+        email_verification_token=verification_token,
+        verification_token_expiry=token_expiry
     )
     
     db.session.add(user)
     db.session.commit()
     
-    # Generate token
-    token = generate_token(user.id)
+    # Send verification email
+    email_sent = send_verification_email(user.email, user.username, verification_token)
+    
+    if not email_sent:
+        # Log error but don't fail registration - user can request resend later
+        print(f"Warning: Failed to send verification email to {user.email}")
     
     return jsonify({
-        'message': 'User registered successfully',
-        'token': token,
+        'message': 'User registered successfully. Please check your email to verify your account.',
+        'email_sent': email_sent,
         'user': {
             'id': user.id,
             'username': user.username,
             'email': user.email,
             'first_name': user.first_name,
-            'last_name': user.last_name
+            'last_name': user.last_name,
+            'is_verified': user.is_verified
         }
     }), 201
 
@@ -592,6 +702,14 @@ def login():
         user = User.query.filter_by(email=email).first()
         
         if user and check_password_hash(user.password_hash, password):
+            # Check if email is verified
+            if not user.is_verified:
+                return jsonify({
+                    'error': 'EMAIL_NOT_VERIFIED',
+                    'message': 'Please verify your email address before logging in. Check your inbox for the verification link.',
+                    'email': user.email
+                }), 403
+            
             token = generate_token(user.id)
             return jsonify({
                 'message': 'Login successful',
@@ -605,7 +723,8 @@ def login():
                     'gender': user.gender,
                     'age': user.age,
                     'location': user.location,
-                    'bio': user.bio
+                    'bio': user.bio,
+                    'is_verified': user.is_verified
                 }
             })
         
@@ -1040,10 +1159,7 @@ def get_messages(match_id):
     delivered_message_ids = []
 
     for message in messages:
-        if (
-            message.receiver_id == user_id
-            and not message.is_delivered
-        ):
+        if message.receiver_id == user_id and not message.is_delivered:
             message.is_delivered = True
             delivered_message_ids.append(message.id)
             db.session.add(message)
@@ -1051,34 +1167,42 @@ def get_messages(match_id):
     if delivered_message_ids:
         db.session.commit()
 
-        # 🔔 REAL-TIME DELIVERY UPDATE TO SENDER
         for message_id in delivered_message_ids:
             socketio.emit(
-    "message_delivered",
-    {
-        "messageId": message_id,
-        "matchId": match_id
-    },
-    room=room
-)
+                "message_delivered",
+                {
+                    "messageId": message_id,
+                    "matchId": match_id
+                },
+                room=room
+            )
 
-    # Build response
+    # 🔥 BUILD RESPONSE (FIXED & SAFE)
     message_list = []
     for message in messages:
-        message_list.append({
-        'id': message.id,
-        'content': '' if message.is_deleted_for_everyone else message.content,
-        'sender_id': message.sender_id,
-        'sent_at': message.sent_at.isoformat(),
-        'is_read': message.is_read,
-        'is_deleted_for_everyone': message.is_deleted_for_everyone,
-        'edited_at': message.edited_at.isoformat() if message.edited_at else None,
-        'reactions': message.reactions,
-        'type': message.type,
-        'media_url': message.content if message.type != 'text' else None,
-        'reply_to': json.loads(message.reply_to) if message.reply_to else None,
-    })
 
+        # ✅ SKIP "DELETE FOR ME" MESSAGES
+        deleted_for_me = MessageDelete.query.filter_by(
+            message_id=message.id,
+            user_id=user_id
+        ).first()
+
+        if deleted_for_me:
+            continue
+
+        message_list.append({
+            'id': message.id,
+            'content': '' if message.is_deleted_for_everyone else message.content,
+            'sender_id': message.sender_id,
+            'sent_at': message.sent_at.isoformat(),
+            'is_read': message.is_read,
+            'is_deleted_for_everyone': message.is_deleted_for_everyone,
+            'edited_at': message.edited_at.isoformat() if message.edited_at else None,
+            'reactions': message.reactions,
+            'type': message.type,
+            'media_url': message.content if message.type != 'text' else None,
+            'reply_to': json.loads(message.reply_to) if message.reply_to else None,
+        })
 
     return jsonify({'messages': message_list})
 
@@ -1213,7 +1337,6 @@ def delete_message(message_id):
         message.is_deleted_for_everyone = True
         db.session.commit()
 
-        # 🔍 Find match
         match = Match.query.filter(
             ((Match.user1_id == message.sender_id) & (Match.user2_id == message.receiver_id)) |
             ((Match.user1_id == message.receiver_id) & (Match.user2_id == message.sender_id))
@@ -1221,18 +1344,30 @@ def delete_message(message_id):
 
         if match:
             payload = {
-    "messageId": message.id,
-    "matchId": match.id
-}
+                "messageId": message.id,
+                "matchId": match.id
+            }
 
-            # ✅ emit to match room
             socketio.emit("message_deleted", payload, room=f"match_{match.id}")
-
-            # 🔥 fallback: emit to both users
             socketio.emit("message_deleted", payload, room=f"user_{message.sender_id}")
             socketio.emit("message_deleted", payload, room=f"user_{message.receiver_id}")
 
         return jsonify({'success': True})
+
+    # 🔥 DELETE FOR ME (THIS WAS MISSING)
+    existing = MessageDelete.query.filter_by(
+        message_id=message_id,
+        user_id=user_id
+    ).first()
+
+    if not existing:
+        db.session.add(
+            MessageDelete(
+                message_id=message_id,
+                user_id=user_id
+            )
+        )
+        db.session.commit()
 
     return jsonify({'success': True})
 
@@ -1908,6 +2043,92 @@ def mark_notification_read(notification_id):
     
     return jsonify({'message': 'Notification marked as read'})
 
+# Email Verification Endpoints
+@app.route('/api/verify-email', methods=['GET'])
+def verify_email():
+    """Verify user email using token from email link"""
+    try:
+        token = request.args.get('token')
+        
+        if not token:
+            return jsonify({'error': 'Verification token is required'}), 400
+        
+        # Find user by verification token
+        user = User.query.filter_by(email_verification_token=token).first()
+        
+        if not user:
+            return jsonify({'error': 'Invalid or expired verification token'}), 400
+        
+        # Check if token has expired
+        if user.verification_token_expiry and user.verification_token_expiry < datetime.utcnow():
+            return jsonify({'error': 'Verification token has expired. Please request a new one.'}), 400
+        
+        # Check if already verified
+        if user.is_verified:
+            return jsonify({'message': 'Email already verified. You can now log in.'}), 200
+        
+        # Verify the user
+        user.is_verified = True
+        user.email_verification_token = None
+        user.verification_token_expiry = None
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Email verified successfully! You can now log in.',
+            'verified': True
+        }), 200
+        
+    except Exception as e:
+        print(f'Email verification error: {str(e)}')
+        return jsonify({'error': 'An error occurred during verification. Please try again.'}), 500
+
+@app.route('/api/resend-verification', methods=['POST'])
+def resend_verification():
+    """Resend verification email to user"""
+    try:
+        data = request.get_json()
+        email = data.get('email', '').strip()
+        
+        if not email:
+            return jsonify({'error': 'Email is required'}), 400
+        
+        # Find user by email
+        user = User.query.filter_by(email=email).first()
+        
+        if not user:
+            # Don't reveal if email exists or not for security
+            return jsonify({
+                'message': 'If an account exists with this email, a verification link has been sent.'
+            }), 200
+        
+        # Check if already verified
+        if user.is_verified:
+            return jsonify({'message': 'Email is already verified. You can log in.'}), 200
+        
+        # Generate new verification token
+        verification_token = generate_verification_token()
+        token_expiry = datetime.utcnow() + timedelta(hours=24)
+        
+        user.email_verification_token = verification_token
+        user.verification_token_expiry = token_expiry
+        db.session.commit()
+        
+        # Send verification email
+        email_sent = send_verification_email(user.email, user.username, verification_token)
+        
+        if email_sent:
+            return jsonify({
+                'message': 'Verification email sent successfully. Please check your inbox.'
+            }), 200
+        else:
+            return jsonify({
+                'error': 'Failed to send verification email. Please try again later.'
+            }), 500
+        
+    except Exception as e:
+        print(f'Resend verification error: {str(e)}')
+        return jsonify({'error': 'An error occurred. Please try again.'}), 500
+
 # Health check endpoint
 @app.route('/api/health', methods=['GET'])
 def health_check():
@@ -2156,6 +2377,8 @@ def handle_seen_message(data):
     )
 
 
+
+
 @app.route("/api/messages/upload", methods=["POST"])
 def upload_media():
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
@@ -2169,16 +2392,77 @@ def upload_media():
     file = request.files["file"]
     media_type = request.form.get("type")
 
-    filename = f"{int(datetime.utcnow().timestamp())}_{file.filename}"
-    os.makedirs("uploads", exist_ok=True)
-    path = os.path.join("uploads", filename)
-    file.save(path)
+    # Only scan images
+    if media_type == "image":
+        # Save file temporarily for scanning
+        temp_filename = f"temp_{int(datetime.utcnow().timestamp())}_{file.filename}"
+        temp_path = os.path.join("uploads", temp_filename)
+        os.makedirs("uploads", exist_ok=True)
+        file.save(temp_path)
+        
+        try:
+            # Scan image for NSFW content (real model if available)
+            is_nsfw, confidence, details = scan_image_nsfw(temp_path)
+            
+            if is_nsfw:
+                # Delete the file
+                try:
+                    os.remove(temp_path)
+                except:
+                    pass
+                
+                return jsonify({
+                    "error": "NSFW_CONTENT_DETECTED",
+                    "message": f"Inappropriate content detected (confidence: {confidence:.1%}). This image cannot be uploaded.",
+                    "confidence": confidence,
+                    "details": details
+                }), 403
+            
+            # Image is safe, rename to final filename
+            filename = f"{int(datetime.utcnow().timestamp())}_{file.filename}"
+            final_path = os.path.join("uploads", filename)
+            os.rename(temp_path, final_path)
+            
+            return jsonify({
+                "url": f"/uploads/{filename}",
+                "type": media_type,
+                "nsfw_checked": True,
+                "confidence": confidence
+            })
+            
+        except Exception as e:
+            print(f"Error during NSFW scan: {str(e)}")
+            # If scanning fails, allow upload (fail-open)
+            # In production, you might want to fail-closed
+            filename = f"{int(datetime.utcnow().timestamp())}_{file.filename}"
+            final_path = os.path.join("uploads", filename)
+            try:
+                if os.path.exists(temp_path):
+                    os.rename(temp_path, final_path)
+                else:
+                    file.seek(0)  # Reset file pointer
+                    file.save(final_path)
+            except:
+                file.seek(0)
+                file.save(final_path)
+            
+            return jsonify({
+                "url": f"/uploads/{filename}",
+                "type": media_type,
+                "nsfw_checked": False,
+                "warning": "Scan failed, upload allowed"
+            })
+    else:
+        # For non-image files, upload directly
+        filename = f"{int(datetime.utcnow().timestamp())}_{file.filename}"
+        os.makedirs("uploads", exist_ok=True)
+        path = os.path.join("uploads", filename)
+        file.save(path)
 
-    return jsonify({
-        "url": f"/uploads/{filename}",
-        "type": media_type
-    })
-
+        return jsonify({
+            "url": f"/uploads/{filename}",
+            "type": media_type
+        })
 
 
 if __name__ == '__main__':

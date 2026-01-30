@@ -12,6 +12,8 @@ export default function LoginScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState(''); // 'error' or 'success'
+  const [unverifiedEmail, setUnverifiedEmail] = useState(null);
+  const [resendingVerification, setResendingVerification] = useState(false);
 
   const validateEmail = (email) => /\S+@\S+\.\S+/.test(email);
 
@@ -31,7 +33,7 @@ export default function LoginScreen({ navigation }) {
     setLoading(true);
     try {
       // Use your Flask backend
-      const response = await fetch('http://10.185.247.132:5000/api/login', {
+      const response = await fetch('http://10.220.165.132:5000/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
@@ -58,8 +60,16 @@ export default function LoginScreen({ navigation }) {
           });
         }, 800);
       } else {
-        setMessage(data.error || 'Invalid credentials. Please sign up if you are a new user.');
-        setMessageType('error');
+        // Check if email is not verified
+        if (data.error === 'EMAIL_NOT_VERIFIED' || response.status === 403) {
+          setMessage(data.message || 'Please verify your email address before logging in.');
+          setMessageType('error');
+          // Store email for resend verification
+          setUnverifiedEmail(email);
+        } else {
+          setMessage(data.error || 'Invalid credentials. Please sign up if you are a new user.');
+          setMessageType('error');
+        }
       }
     } catch (e) {
       console.error('Login error:', e);
@@ -72,6 +82,39 @@ export default function LoginScreen({ navigation }) {
 
   const handleSignup = () => {
     navigation.navigate('Signup');
+  };
+
+  const handleResendVerification = async () => {
+    if (!unverifiedEmail) return;
+    
+    setResendingVerification(true);
+    setMessage('');
+    setMessageType('');
+    
+    try {
+      const response = await fetch('http://10.220.165.132:5000/api/resend-verification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: unverifiedEmail }),
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok) {
+        setMessage(data.message || 'Verification email sent! Please check your inbox.');
+        setMessageType('success');
+        setUnverifiedEmail(null); // Clear after successful resend
+      } else {
+        setMessage(data.error || 'Failed to resend verification email. Please try again.');
+        setMessageType('error');
+      }
+    } catch (e) {
+      console.error('Resend verification error:', e);
+      setMessage('Connection error. Please check if backend is running.');
+      setMessageType('error');
+    } finally {
+      setResendingVerification(false);
+    }
   };
 
   return (
@@ -111,9 +154,24 @@ export default function LoginScreen({ navigation }) {
           </TouchableOpacity>
         </View>
         {message ? (
-          <Text style={[styles.message, messageType === 'success' ? styles.success : styles.error]}>
-            {message}
-          </Text>
+          <View style={styles.messageContainer}>
+            <Text style={[styles.message, messageType === 'success' ? styles.success : styles.error]}>
+              {message}
+            </Text>
+            {unverifiedEmail && messageType === 'error' && (
+              <TouchableOpacity 
+                onPress={handleResendVerification} 
+                disabled={resendingVerification}
+                style={styles.resendButton}
+              >
+                {resendingVerification ? (
+                  <ActivityIndicator size="small" color="#10b981" />
+                ) : (
+                  <Text style={styles.resendButtonText}>Resend Verification Email</Text>
+                )}
+              </TouchableOpacity>
+            )}
+          </View>
         ) : null}
         {loading ? (
           <ActivityIndicator size="small" color="#fff" style={{ marginVertical: 10 }} />
@@ -162,11 +220,30 @@ const styles = StyleSheet.create({
     right: 10,
     padding: 4,
   },
+  messageContainer: {
+    width: 250,
+    marginBottom: 10,
+    alignItems: 'center',
+  },
   message: {
     marginBottom: 10,
     fontWeight: 'bold',
     textAlign: 'center',
     fontSize: 15,
+  },
+  resendButton: {
+    marginTop: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 15,
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#10b981',
+  },
+  resendButtonText: {
+    color: '#10b981',
+    fontSize: 14,
+    fontWeight: '600',
   },
   error: {
     color: '#ff3b3b',

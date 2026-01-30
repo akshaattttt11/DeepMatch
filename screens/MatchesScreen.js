@@ -24,10 +24,13 @@ import { ActionSheetIOS } from 'react-native';
 import Modal from 'react-native-modal';
 import * as ImagePicker from 'expo-image-picker';
 import { Keyboard, BackHandler } from 'react-native';
+import { Swipeable } from 'react-native-gesture-handler';
+import * as FileSystem from "expo-file-system";
+import { NSFWScannerWebView } from "../components/NSFWScannerWebView";
 
 
 // API Configuration
-const API_BASE_URL = 'http://10.185.247.132:5000';
+const API_BASE_URL = 'http://10.220.165.132:5000';
 
 export default function MatchesScreen({ navigation }) {
   const [matches, setMatches] = useState([]);
@@ -96,6 +99,17 @@ useEffect(() => {
       const isMe =
         msg.sender_id === currentUser.id || msg.sender === "me";
 
+      // Parse reply_to if it's a string (JSON)
+      let replyTo = msg.reply_to || null;
+      if (replyTo && typeof replyTo === 'string') {
+        try {
+          replyTo = JSON.parse(replyTo);
+        } catch (e) {
+          console.error('Failed to parse reply_to:', e);
+          replyTo = null;
+        }
+      }
+
       return {
         ...prev,
         [matchId]: [
@@ -112,7 +126,7 @@ useEffect(() => {
             isRead: false,
             editedAt: msg.edited_at || null,
             isDeleted: msg.is_deleted_for_everyone || false,
-            reply_to: msg.reply_to || null,
+            reply_to: replyTo,
             reactions: msg.reactions || null,
           },
         ],
@@ -680,7 +694,18 @@ useEffect(() => {
         reactions: msg.reactions ? JSON.parse(msg.reactions) : null,
         type: msg.type || 'text',
         media_url: msg.media_url || null,
-        reply_to: msg.reply_to || null,
+        reply_to: (() => {
+          if (!msg.reply_to) return null;
+          if (typeof msg.reply_to === 'string') {
+            try {
+              return JSON.parse(msg.reply_to);
+            } catch (e) {
+              console.error('Failed to parse reply_to:', e);
+              return null;
+            }
+          }
+          return msg.reply_to;
+        })(),
       };
     });
 
@@ -1262,12 +1287,19 @@ const ChatInterface = ({
   navigation
 }) => {
   const typingTimeoutRef = useRef(null);
+  const textInputRef = useRef(null);
+  const nsfwScannerRef = useRef(null);
   const [editingMessage, setEditingMessage] = useState(null);
   const [actionMessage, setActionMessage] = useState(null);
   const [showActionSheet, setShowActionSheet] = useState(false);
   const [showReactionBar, setShowReactionBar] = useState(false);
   const [reactionTarget, setReactionTarget] = useState(null);
   const [replyingTo, setReplyingTo] = useState(null);
+  const [scanningImage, setScanningImage] = useState(false);
+  const [nsfwScannerReady, setNsfwScannerReady] = useState(false);
+  const [nsfwModalVisible, setNsfwModalVisible] = useState(false);
+  const [nsfwModalMessage, setNsfwModalMessage] = useState('');
+  const [nsfwModalConfidence, setNsfwModalConfidence] = useState(null);
 
 useEffect(() => {
   const backHandler = () => {
@@ -1302,10 +1334,30 @@ useEffect(() => {
   const matchIdToUse = selectedMatch.matchId || selectedMatch.id;
   const matchMessages = messages[matchIdToUse] || [];
   const flatListRef = useRef(null);
+  const swipeableRefs = useRef({});
   
   const showMessageActions = (message) => {
   setActionMessage(message);
   setShowActionSheet(true);
+};
+
+const handleSwipeReply = (message) => {
+  setReplyingTo({
+    id: message.id,
+    text: message.type === 'image' ? '📷 Photo' : message.text,
+    sender: message.sender,
+    type: message.type,
+  });
+  
+  // Close any open swipeables
+  Object.values(swipeableRefs.current).forEach(ref => {
+    if (ref) ref.close();
+  });
+  
+  // Focus input field
+  setTimeout(() => {
+    textInputRef.current?.focus();
+  }, 100);
 };
 
 const handleMessageLongPress = (message) => {
@@ -1313,13 +1365,6 @@ const handleMessageLongPress = (message) => {
 
   setReactionTarget(message);
   setShowReactionBar(true);
-
-  setReplyingTo({
-    id: message.id,
-    text: message.type === 'image' ? '📷 Photo' : message.text,
-    sender: message.sender,
-    type: message.type,
-  });
 
   setTimeout(() => {
     showMessageActions(message);
@@ -1350,6 +1395,14 @@ const deleteMessage = async (messageId, deleteForEveryone) => {
       throw new Error('Delete failed');
     }
 
+    if (!deleteForEveryone) {
+      const matchId = selectedMatch.matchId || selectedMatch.id;
+      setMessages(prev => ({
+        ...prev,
+        [matchId]: (prev[matchId] || []).filter(m => m.id !== messageId)
+      }));
+    }
+
   } catch (e) {
     Alert.alert('Error', 'Failed to delete message');
   }
@@ -1364,6 +1417,7 @@ const handleCopy = () => {
 };
 
 const handleDeleteForMe = () => {
+  deleteMessage(actionMessage.id, false);
    // 🔹 HIDE reaction bar
   setShowReactionBar(false);
   setReactionTarget(null);
@@ -1384,6 +1438,25 @@ const handleEdit = () => {
   setShowReactionBar(false);
   setReactionTarget(null);
   closeActionSheet();
+};
+
+const handleReply = () => {
+  if (!actionMessage) return;
+  
+  setReplyingTo({
+    id: actionMessage.id,
+    text: actionMessage.type === 'image' ? '📷 Photo' : actionMessage.text,
+    sender: actionMessage.sender,
+    type: actionMessage.type,
+  });
+  
+  // 🔹 HIDE reaction bar
+  setShowReactionBar(false);
+  setReactionTarget(null);
+  closeActionSheet();
+  
+  // Focus input field
+  textInputRef.current?.focus();
 };
 
 const closeActionSheet = () => {
@@ -1453,45 +1526,134 @@ const pickImage = async () => {
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ImagePicker.MediaTypeOptions.Images,
     quality: 0.8,
+    base64: true,
   });
 
   if (!result.canceled) {
-    uploadMedia(result.assets[0].uri, "image");
+    uploadMedia(result.assets[0].uri, "image", result.assets[0].base64 || null);
   }
 };
 
-const uploadMedia = async (uri, type) => {
-  const token = await AsyncStorage.getItem("auth_token");
-  const form = new FormData();
+const uploadMedia = async (uri, type, base64Override = null) => {
+  try {
+    // Show scanning indicator
+    setScanningImage(true);
 
-  form.append("file", {
-    uri,
-    name: "image.jpg",
-    type: "image/jpeg",
-  });
+    // 1) Frontend NSFW scan (WebView + NSFWJS) BEFORE uploading
+    // Use 0.5 threshold (more strict, as you requested)
+    const threshold = 0.5;
+    let base64 = base64Override;
+    if (!base64) {
+      base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+    }
 
-  form.append("type", type);
+    let scanResult = null;
+    if (nsfwScannerRef.current) {
+      try {
+        // If scanner isn't ready yet, we still try; it will load model on demand.
+        scanResult = await nsfwScannerRef.current.scanBase64(base64, {
+          threshold,
+          timeoutMs: 20000,
+        });
+        if (scanResult) {
+          console.log(
+            "[NSFW] predictions:",
+            JSON.stringify(scanResult.predictions || [], null, 2)
+          );
+          console.log(
+            "[NSFW] nsfwScore:",
+            scanResult.nsfwScore,
+            "threshold:",
+            scanResult.threshold
+          );
+        }
+      } catch (scanError) {
+        // If CDN/model fails to load, fall back to backend-only scanning.
+        // Log only in development so production stays clean.
+        if (__DEV__) {
+          console.log(
+            "NSFW scan unavailable, falling back to backend only:",
+            scanError?.message || scanError
+          );
+        }
+      }
+    }
 
-  const res = await fetch(`${API_BASE_URL}/api/messages/upload`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "multipart/form-data",
-    },
-    body: form,
-  });
+    if (scanResult?.isNSFW) {
+      // Show in-app styled modal instead of system alert
+      setNsfwModalMessage(
+        `This image appears inappropriate (confidence: ${(scanResult.nsfwScore * 100).toFixed(
+          1
+        )}%). This image cannot be uploaded.`
+      );
+      setNsfwModalConfidence((scanResult.nsfwScore * 100).toFixed(1));
+      setNsfwModalVisible(true);
+      return; // Block locally
+    }
 
-  const data = await res.json();
+    // 2) Upload image (backend can still keep a second layer of protection)
+    const token = await AsyncStorage.getItem("auth_token");
+    const form = new FormData();
 
-  // send as normal message
-  handleSendMessage(
-  {
-    media_url: data.url,
-    type: data.type,
-  },
-  replyingTo
-);
-setReplyingTo(null);
+    form.append("file", {
+      uri,
+      name: "image.jpg",
+      type: "image/jpeg",
+    });
+
+    form.append("type", type);
+
+    const res = await fetch(`${API_BASE_URL}/api/messages/upload`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "multipart/form-data",
+      },
+      body: form,
+    });
+
+    const data = await res.json();
+
+    // Check if backend detected NSFW content
+    if (!res.ok && data.error === 'NSFW_CONTENT_DETECTED') {
+      setScanningImage(false);
+      // Show same dark in-app modal used for frontend scan results
+      setNsfwModalMessage(
+        data.message ||
+          `Inappropriate content detected (confidence: ${(
+            (data.confidence || 0) * 100
+          ).toFixed(1)}%). This image cannot be uploaded.`
+      );
+      setNsfwModalConfidence(((data.confidence || 0) * 100).toFixed(1));
+      setNsfwModalVisible(true);
+      return; // Block upload
+    }
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Upload failed');
+    }
+
+    // Image is safe, send as normal message
+    handleSendMessage(
+      {
+        media_url: data.url,
+        type: data.type,
+      },
+      replyingTo
+    );
+    setReplyingTo(null);
+  } catch (error) {
+    console.error('Upload error:', error);
+    Alert.alert(
+      'Error',
+      error.message || 'Failed to upload image. Please try again.',
+      [{ text: 'OK' }]
+    );
+  } finally {
+    setScanningImage(false);
+  }
 };
 
 
@@ -1512,6 +1674,10 @@ const canEdit =
       style={{ flex: 1 }}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
+      <NSFWScannerWebView
+        ref={nsfwScannerRef}
+        onReady={() => setNsfwScannerReady(true)}
+      />
       <View style={styles.chatContainer}>
         {/* Header */}
         <View style={styles.chatHeader}>
@@ -1570,40 +1736,60 @@ const canEdit =
           </View>
         )}
 
-        {/* 🔹 LONG PRESS ENABLED MESSAGE */}
-        <TouchableOpacity
-          activeOpacity={0.7}
-          onLongPress={() => handleMessageLongPress(item)}
-        >
-        
-        {/* 🔥 WHATSAPP-STYLE REACTION BAR */}
-  {showReactionBar && reactionTarget?.id === item.id && (
-    <View style={styles.reactionBar}>
-      {['👍', '❤️', '😂', '😮', '😢'].map(emoji => (
-        <TouchableOpacity
-          key={emoji}
-          onPress={() => {
-            reactToMessage(item.id, emoji);
-            setShowReactionBar(false);
-            setReactionTarget(null);
+        {/* 🔹 SWIPEABLE MESSAGE WITH REPLY GESTURE (Works for both own and other's messages) */}
+        <Swipeable
+          ref={(ref) => {
+            if (ref) swipeableRefs.current[item.id] = ref;
           }}
+          renderLeftActions={() => {
+            // Show swipe-to-reply for ALL messages (like WhatsApp) - swipe RIGHT to reveal
+            return (
+              <View style={styles.swipeReplyContainerLeft}>
+                <View style={styles.swipeReplyButton}>
+                  <Ionicons name="arrow-undo" size={24} color="#fff" />
+                  <Text style={styles.swipeReplyText}>Reply</Text>
+                </View>
+              </View>
+            );
+          }}
+          onSwipeableLeftOpen={() => handleSwipeReply(item)}
+          leftThreshold={40}
+          overshootLeft={false}
+          friction={2}
         >
-          <Text style={styles.reactionEmoji}>{emoji}</Text>
-        </TouchableOpacity>
-      ))}
-    </View>
-  )}
-          <View
-  style={[
-    styles.messageBubble,
-    item.sender === 'me'
-      ? styles.myMessage
-      : styles.theirMessage,
-    isGone && {
-  backgroundColor: '#2a2a2a',
-},
-  ]}
->
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onLongPress={() => handleMessageLongPress(item)}
+          >
+          
+          {/* 🔥 WHATSAPP-STYLE REACTION BAR */}
+    {showReactionBar && reactionTarget?.id === item.id && (
+      <View style={styles.reactionBar}>
+        {['👍', '❤️', '😂', '😮', '😢'].map(emoji => (
+          <TouchableOpacity
+            key={emoji}
+            onPress={() => {
+              reactToMessage(item.id, emoji);
+              setShowReactionBar(false);
+              setReactionTarget(null);
+            }}
+          >
+            <Text style={styles.reactionEmoji}>{emoji}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    )}
+            <View
+    style={[
+      styles.messageBubble,
+      item.sender === 'me'
+        ? styles.myMessage
+        : styles.theirMessage,
+      isGone && {
+    backgroundColor: '#2a2a2a',
+  },
+    ]}
+  >
 
   {/* 🔁 REPLIED MESSAGE PREVIEW */}
   {item.reply_to && (
@@ -1698,7 +1884,8 @@ const canEdit =
               </View>
             </View>
           </View>
-        </TouchableOpacity>
+          </TouchableOpacity>
+        </Swipeable>
       </View>
     );
   }}
@@ -1736,13 +1923,32 @@ const canEdit =
 )}
 
 
+        {/* Scanning Indicator */}
+        {scanningImage && (
+          <View style={styles.scanningOverlay}>
+            <View style={styles.scanningContainer}>
+              <ActivityIndicator size="large" color="#10b981" />
+              <Text style={styles.scanningText}>Scanning image for inappropriate content...</Text>
+            </View>
+          </View>
+        )}
+
         {/* ✅ INPUT BAR (THIS WAS BROKEN BEFORE) */}
         <View style={styles.messageInputContainer}>
-          <TouchableOpacity onPress={pickImage} style={{ marginRight: 6 }}>
-          <Ionicons name="image-outline" size={22} color="#10b981" />
+          <TouchableOpacity 
+            onPress={pickImage} 
+            style={{ marginRight: 6 }}
+            disabled={scanningImage}
+          >
+          <Ionicons 
+            name="image-outline" 
+            size={22} 
+            color={scanningImage ? "#666" : "#10b981"} 
+          />
           </TouchableOpacity>
 
           <TextInput
+            ref={textInputRef}
             style={styles.messageInput}
             placeholder="Type a message..."
             placeholderTextColor="#9ca3af"
@@ -1814,6 +2020,28 @@ const canEdit =
         </View>
       </View>
 
+      {/* NSFW Warning Modal (dark themed) */}
+      <Modal
+        isVisible={nsfwModalVisible}
+        onBackdropPress={() => setNsfwModalVisible(false)}
+        onBackButtonPress={() => setNsfwModalVisible(false)}
+        style={{ justifyContent: 'center', alignItems: 'center', margin: 0 }}
+      >
+        <View style={{ width: '90%', backgroundColor: '#04070a', borderRadius: 12, padding: 18 }}>
+          <Text style={{ color: '#fff', fontSize: 18, fontWeight: '700', marginBottom: 8 }}>
+            ⚠️ Inappropriate Content Detected
+          </Text>
+          <Text style={{ color: '#e5e7eb', fontSize: 14, marginBottom: 18 }}>
+            {nsfwModalMessage || `Inappropriate content detected (confidence: ${nsfwModalConfidence || 'N/A'}%). This image cannot be uploaded.`}
+          </Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
+            <TouchableOpacity onPress={() => setNsfwModalVisible(false)} style={{ paddingHorizontal: 8, paddingVertical: 6 }}>
+              <Text style={{ color: '#10b981', fontWeight: '600', fontSize: 15 }}>OK</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       <Modal
   isVisible={showActionSheet}
   onBackdropPress={closeActionSheet}
@@ -1823,6 +2051,10 @@ const canEdit =
   <View style={styles.actionSheet}>
     <TouchableOpacity style={styles.sheetItem} onPress={handleCopy}>
       <Text style={styles.sheetText}>Copy</Text>
+    </TouchableOpacity>
+
+    <TouchableOpacity style={styles.sheetItem} onPress={handleReply}>
+      <Text style={styles.sheetText}>Reply</Text>
     </TouchableOpacity>
 
     {canEdit && (
@@ -2253,6 +2485,34 @@ reactionEmoji: {
   marginHorizontal: 6,
 },
 
+swipeReplyContainer: {
+  justifyContent: 'center',
+  alignItems: 'flex-start',
+  paddingLeft: 16,
+  width: 100,
+},
+swipeReplyContainerLeft: {
+  justifyContent: 'center',
+  alignItems: 'flex-end',
+  paddingRight: 16,
+  width: 100,
+},
+swipeReplyButton: {
+  backgroundColor: '#10b981',
+  borderRadius: 8,
+  paddingVertical: 12,
+  paddingHorizontal: 16,
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 6,
+},
+swipeReplyText: {
+  color: '#fff',
+  fontSize: 14,
+  fontWeight: '600',
+},
+
 replyPreview: {
   flexDirection: 'row',
   alignItems: 'center',
@@ -2514,6 +2774,30 @@ quotedText: {
     alignItems: 'center',
     marginBottom: 24,
   },
+  scanningOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  scanningContainer: {
+    backgroundColor: '#1f1f1f',
+    padding: 20,
+    borderRadius: 12,
+    alignItems: 'center',
+    minWidth: 250,
+  },
+  scanningText: {
+    color: '#fff',
+    marginTop: 12,
+    fontSize: 14,
+    textAlign: 'center',
+  },
   modalProfileImage: {
     width: 80,
     height: 80,
@@ -2579,6 +2863,17 @@ quotedText: {
   modalChatButtonText: {
     color: '#fff',
     fontSize: 16,
+    fontWeight: '600',
+  },
+  nsfwWarningBanner: {
+    backgroundColor: '#fbbf24',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  nsfwWarningText: {
+    color: '#1f2933',
+    fontSize: 12,
+    textAlign: 'center',
     fontWeight: '600',
   },
 });

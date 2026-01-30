@@ -23,7 +23,7 @@ import PiscesIcon from '../components/zodiac/PiscesIcon';
 const { width, height } = Dimensions.get('window');
 const ZODIAC_QUIZ_STORAGE_KEY = 'user_zodiac_quiz_results';
 const COMPATIBLE_ZODIAC_KEY = 'user_compatible_zodiac';
-const API_BASE_URL = 'http://10.185.247.132:5000';
+const API_BASE_URL = 'http://10.220.165.132:5000';
 
 const zodiacQuestions = [
   { question: 'What is your zodiac sign?', answers: [ { text: 'Aries', value: 'Aries' }, { text: 'Taurus', value: 'Taurus' }, { text: 'Gemini', value: 'Gemini' }, { text: 'Cancer', value: 'Cancer' }, { text: 'Leo', value: 'Leo' }, { text: 'Virgo', value: 'Virgo' }, { text: 'Libra', value: 'Libra' }, { text: 'Scorpio', value: 'Scorpio' }, { text: 'Sagittarius', value: 'Sagittarius' }, { text: 'Capricorn', value: 'Capricorn' }, { text: 'Aquarius', value: 'Aquarius' }, { text: 'Pisces', value: 'Pisces' } ] },

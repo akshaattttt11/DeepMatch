@@ -233,7 +233,7 @@ class SimpleService {
       }
       
       // Simple backend sync - you can customize this
-      const response = await fetch('http://10.185.247.132:5000/api/profile', {
+      const response = await fetch('http://10.220.165.132:5000/api/profile', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

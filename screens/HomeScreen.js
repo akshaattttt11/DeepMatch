@@ -1,13 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, Image, StyleSheet, TouchableOpacity, SafeAreaView, Platform, Dimensions, Modal, Animated, ScrollView, Alert, TextInput } from 'react-native';
+import { View, Text, Image, StyleSheet, TouchableOpacity, SafeAreaView, Platform, Dimensions, Modal, Animated, ScrollView, Alert, TextInput, ActivityIndicator } from 'react-native';
 import { Ionicons, FontAwesome, MaterialCommunityIcons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { Picker } from '@react-native-picker/picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MultiSlider from '@ptomasroos/react-native-multi-slider';
+import { getVerifiedLocation } from '../utils/locationService';
 
 // API Configuration
-const API_BASE_URL = 'http://10.185.247.132:5000';
+const API_BASE_URL = 'http://10.220.165.132:5000';
  
 const { width } = Dimensions.get('window');
 
@@ -76,6 +77,7 @@ export default function HomeScreen({ navigation }) {
   const [intentModal, setIntentModal] = useState(false);
   const [locationModal, setLocationModal] = useState(false);
   const [locationInput, setLocationInput] = useState('');
+  const [gettingLocation, setGettingLocation] = useState(false);
   const [genderModal, setGenderModal] = useState(false);
   const [distanceModal, setDistanceModal] = useState(false);
 
@@ -945,14 +947,38 @@ export default function HomeScreen({ navigation }) {
             <View style={styles.sheetHandle} />
             <Text style={styles.sheetTitle}>Location</Text>
             <Text style={styles.sheetSubtitle}>Enter a location to filter by</Text>
-            <TextInput
-              style={styles.locationInput}
-              placeholder="Enter location (e.g., Mumbai)"
-              placeholderTextColor="#999"
-              value={locationInput}
-              onChangeText={setLocationInput}
-              autoCapitalize="words"
-            />
+            <View style={styles.locationInputContainer}>
+              <TextInput
+                style={styles.locationInputField}
+                placeholder="Enter location (e.g., Mumbai)"
+                placeholderTextColor="#999"
+                value={locationInput}
+                onChangeText={setLocationInput}
+                autoCapitalize="words"
+              />
+              <TouchableOpacity
+                style={styles.locationButton}
+                onPress={async () => {
+                  try {
+                    setGettingLocation(true);
+                    const verified = await getVerifiedLocation();
+                    setLocationInput(verified.location);
+                    Alert.alert('Location Verified', `Location set to: ${verified.location}`);
+                  } catch (error) {
+                    Alert.alert('Error', error.message || 'Failed to get location. Please enable location permissions.');
+                  } finally {
+                    setGettingLocation(false);
+                  }
+                }}
+                disabled={gettingLocation}
+              >
+                {gettingLocation ? (
+                  <ActivityIndicator size="small" color="#10b981" />
+                ) : (
+                  <Ionicons name="locate" size={20} color="#10b981" />
+                )}
+              </TouchableOpacity>
+            </View>
             <TouchableOpacity
               style={styles.applyBtn}
               onPress={() => {
@@ -1487,7 +1513,14 @@ const styles = StyleSheet.create({
     color: '#6b6b6b',
     fontWeight: '600',
   },
-  locationInput: {
+  locationInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 24,
+    gap: 8,
+  },
+  locationInputField: {
+    flex: 1,
     backgroundColor: '#fff',
     borderRadius: 12,
     borderWidth: 1,
@@ -1496,7 +1529,17 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     fontSize: 16,
     color: '#111',
-    marginTop: 24,
+    height: 48,
+  },
+  locationButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#10b981',
   },
   blurOverlay: {
     ...StyleSheet.absoluteFillObject,

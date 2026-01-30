@@ -202,7 +202,7 @@ export default function SignupScreen({ navigation }) {
     }
     setCheckingEmail(true);
     try {
-      const response = await fetch(`http://10.185.247.132:5000/api/check-email?email=${encodeURIComponent(emailValue)}`, {
+      const response = await fetch(`http://10.220.165.132:5000/api/check-email?email=${encodeURIComponent(emailValue)}`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -317,7 +317,7 @@ export default function SignupScreen({ navigation }) {
     setLoading(true);
     try {
       // Use your Flask backend
-      const response = await fetch('http://10.185.247.132:5000/api/register', {
+      const response = await fetch('http://10.220.165.132:5000/api/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -341,11 +341,15 @@ export default function SignupScreen({ navigation }) {
       const data = await response.json();
       
       if (response.ok || response.status === 201) {
-        setMessage('Registration successful! Please log in.');
+        if (data.email_sent) {
+          setMessage('Registration successful! Please check your email to verify your account before logging in.');
+        } else {
+          setMessage('Registration successful! However, verification email could not be sent. You can request a resend from the login screen.');
+        }
         setMessageType('success');
         setTimeout(() => {
           navigation.replace('Login');
-        }, 1000);
+        }, 2000);
       } else {
         setMessage(data.error || 'Registration failed. Please try again.');
         setMessageType('error');

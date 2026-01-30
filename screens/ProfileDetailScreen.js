@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get('window');
-const API_BASE_URL = 'http://10.185.247.132:5000';
+const API_BASE_URL = 'http://10.220.165.132:5000';
 
 export default function ProfileDetailScreen({ route, navigation }) {
   const { userId } = route.params;
