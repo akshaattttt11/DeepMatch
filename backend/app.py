@@ -16,6 +16,12 @@ import pytz
 
 import logging
 import threading
+try:
+    from sendgrid import SendGridAPIClient
+    from sendgrid.helpers.mail import Mail, Email, To, Content
+    SENDGRID_AVAILABLE = True
+except Exception:
+    SENDGRID_AVAILABLE = False
 
 logging.basicConfig(
     level=logging.INFO,
@@ -407,10 +413,8 @@ def send_verification_email(user_email, username, token):
         verification_url = f"{base_url}/api/verify-email?token={token}"
         
         # Create email message - use EmailMessage alias to avoid conflict with SQLAlchemy Message model
-        msg = EmailMessage()
-        msg.recipients = [user_email]
-        msg.subject = 'Verify Your DeepMatch Account'
-        msg.html = f"""
+        subject = 'Verify Your DeepMatch Account'
+        html_content = f"""
             <html>
             <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
                 <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
@@ -432,21 +436,41 @@ def send_verification_email(user_email, username, token):
             </body>
             </html>
             """
-        msg.body = f"""
-Welcome to DeepMatch, {username}!
 
-Thank you for signing up. Please verify your email address by clicking the link below:
+        # Prefer SendGrid Web API if API key is available to avoid SMTP network blocks
+        sg_key = os.environ.get("SENDGRID_API_KEY") or os.environ.get("SENDGRID_KEY")
+        if sg_key and SENDGRID_AVAILABLE:
+            try:
+                message = Mail(
+                    from_email=os.environ.get("MAIL_DEFAULT_SENDER", "no-reply@deepmatch.com"),
+                    to_emails=user_email,
+                    subject=subject,
+                    html_content=html_content
+                )
+                sg = SendGridAPIClient(sg_key)
+                resp = sg.send(message)
+                # 202 is accepted
+                if resp.status_code in (200, 202):
+                    return True
+                else:
+                    print("SendGrid response:", resp.status_code, resp.body)
+            except Exception as e:
+                print("SendGrid error:", e)
 
-{verification_url}
-
-This link will expire in 24 hours. If you didn't create an account, please ignore this email.
-
-Best regards,
-The DeepMatch Team
-            """
-        
-        mail.send(msg)
-        return True
+        # Fallback to SMTP via Flask-Mail
+        try:
+            msg = EmailMessage()
+            msg.recipients = [user_email]
+            msg.subject = subject
+            msg.html = html_content
+            msg.body = f"Welcome to DeepMatch, {username}!\n\nVerify here: {verification_url}\n\nThis link will expire in 24 hours."
+            mail.send(msg)
+            return True
+        except Exception as e:
+            print("Error sending verification email:", e)
+            import traceback
+            traceback.print_exc()
+            return False
     except Exception as e:
         print(f"Error sending verification email: {str(e)}")
         import traceback
@@ -666,7 +690,9 @@ def register():
     # Send verification email asynchronously so registration request isn't blocked
     def _send_async_verification(email_addr, username, token):
         try:
-            ok = send_verification_email(email_addr, username, token)
+            # Ensure Flask app context is available for Flask-Mail fallback
+            with app.app_context():
+                ok = send_verification_email(email_addr, username, token)
             if not ok:
                 print(f"Warning: Failed to send verification email to {email_addr}")
             else:
