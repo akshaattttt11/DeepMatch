@@ -15,6 +15,7 @@ from flask_socketio import SocketIO, emit, join_room, leave_room, rooms
 import pytz
 
 import logging
+import threading
 
 logging.basicConfig(
     level=logging.INFO,
@@ -662,12 +663,23 @@ def register():
     db.session.add(user)
     db.session.commit()
     
-    # Send verification email
-    email_sent = send_verification_email(user.email, user.username, verification_token)
-    
-    if not email_sent:
-        # Log error but don't fail registration - user can request resend later
-        print(f"Warning: Failed to send verification email to {user.email}")
+    # Send verification email asynchronously so registration request isn't blocked
+    def _send_async_verification(email_addr, username, token):
+        try:
+            ok = send_verification_email(email_addr, username, token)
+            if not ok:
+                print(f"Warning: Failed to send verification email to {email_addr}")
+            else:
+                print(f"Verification email queued/sent for {email_addr}")
+        except Exception as e:
+            print(f"Async email error for {email_addr}: {e}")
+
+    threading.Thread(
+        target=_send_async_verification,
+        args=(user.email, user.username, verification_token),
+        daemon=True
+    ).start()
+    email_sent = "queued"
     
     return jsonify({
         'message': 'User registered successfully. Please check your email to verify your account.',
