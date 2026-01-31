@@ -6,13 +6,13 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y build-essential gcc libpq-dev git curl && rm -rf /var/lib/apt/lists/*
 
 # Copy only requirements first to leverage layer caching
-COPY backend/requirements.txt /app/requirements.txt
+COPY requirements.txt /app/requirements.txt
 
 RUN python -m pip install --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # Copy app code
-COPY backend /app
+COPY . /app
 
 ENV PYTHONUNBUFFERED=1
 
