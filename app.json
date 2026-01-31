@@ -21,6 +21,8 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true
+      , "package": "com.deepmatch.app",
+      "versionCode": 1
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -29,5 +31,9 @@
       "expo-video",
       "expo-sqlite"
     ]
+    ,
+    "extra": {
+      "apiBaseUrl": "${EXPO_PUBLIC_API_BASE_URL}"
+    }
   }
 }
