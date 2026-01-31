@@ -2202,6 +2202,15 @@ def migrate_database():
 
 
 # Run migration on startup
+# Ensure all tables exist before attempting migrations (prevents ALTER on missing tables)
+with app.app_context():
+    try:
+        db.create_all()
+        print("✅ Created missing tables (if any).")
+    except Exception as e:
+        print(f"⚠️ create_all() warning: {e}")
+
+# Run migrations (adds columns safely)
 migrate_database()
 
 
