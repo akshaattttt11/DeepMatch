@@ -16,12 +16,7 @@ import pytz
 
 import logging
 import threading
-try:
-    from sendgrid import SendGridAPIClient
-    from sendgrid.helpers.mail import Mail, Email, To, Content
-    SENDGRID_AVAILABLE = True
-except Exception:
-    SENDGRID_AVAILABLE = False
+SENDGRID_AVAILABLE = False
 
 logging.basicConfig(
     level=logging.INFO,
@@ -409,7 +404,7 @@ def send_verification_email(user_email, username, token):
     """Send email verification link to user"""
     try:
         # Get the base URL from environment or use default
-        base_url = os.environ.get('APP_BASE_URL', 'http://10.82.196.132:5000')
+        base_url = os.environ.get('APP_BASE_URL', 'https://deepmatch.onrender.com')
         verification_url = f"{base_url}/api/verify-email?token={token}"
         
         # Create email message - use EmailMessage alias to avoid conflict with SQLAlchemy Message model
@@ -436,26 +431,6 @@ def send_verification_email(user_email, username, token):
             </body>
             </html>
             """
-
-        # Prefer SendGrid Web API if API key is available to avoid SMTP network blocks
-        sg_key = os.environ.get("SENDGRID_API_KEY") or os.environ.get("SENDGRID_KEY")
-        if sg_key and SENDGRID_AVAILABLE:
-            try:
-                message = Mail(
-                    from_email=os.environ.get("MAIL_DEFAULT_SENDER", "no-reply@deepmatch.com"),
-                    to_emails=user_email,
-                    subject=subject,
-                    html_content=html_content
-                )
-                sg = SendGridAPIClient(sg_key)
-                resp = sg.send(message)
-                # 202 is accepted
-                if resp.status_code in (200, 202):
-                    return True
-                else:
-                    print("SendGrid response:", resp.status_code, resp.body)
-            except Exception as e:
-                print("SendGrid error:", e)
 
         # Fallback to SMTP via Flask-Mail
         try:
