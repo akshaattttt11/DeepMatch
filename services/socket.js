@@ -1,6 +1,6 @@
 import { io } from "socket.io-client";
 
-const SOCKET_URL = "http://10.220.165.132:5000";
+const SOCKET_URL = "https://deepmatch.onrender.com";
 
 let socket = null;
 

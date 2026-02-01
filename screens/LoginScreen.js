@@ -33,7 +33,7 @@ export default function LoginScreen({ navigation }) {
     setLoading(true);
     try {
       // Use your Flask backend
-      const response = await fetch('http://10.220.165.132:5000/api/login', {
+      const response = await fetch('https://deepmatch.onrender.com/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
@@ -92,7 +92,7 @@ export default function LoginScreen({ navigation }) {
     setMessageType('');
     
     try {
-      const response = await fetch('http://10.220.165.132:5000/api/resend-verification', {
+      const response = await fetch('https://deepmatch.onrender.com/api/resend-verification', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: unverifiedEmail }),

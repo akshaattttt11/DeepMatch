@@ -20,8 +20,8 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
-      , "package": "com.deepmatch.app",
+      "edgeToEdgeEnabled": true,
+      "package": "com.deepmatch.app",
       "versionCode": 1
     },
     "web": {
@@ -30,10 +30,12 @@
     "plugins": [
       "expo-video",
       "expo-sqlite"
-    ]
-    ,
+    ],
     "extra": {
-      "apiBaseUrl": "${EXPO_PUBLIC_API_BASE_URL}"
+      "apiBaseUrl": "${EXPO_PUBLIC_API_BASE_URL}",
+      "eas": {
+        "projectId": "955d3f8c-4794-4810-a435-f30c0b5b455b"
+      }
     }
   }
 }

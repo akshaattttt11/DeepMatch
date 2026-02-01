@@ -7,7 +7,7 @@ import ConfettiCannon from 'react-native-confetti-cannon';
 import LottieWrapper from '../components/lottie/LottieWrapper';
 
 // API Configuration
-const API_BASE_URL = 'http://10.220.165.132:5000';
+const API_BASE_URL = 'https://deepmatch.onrender.com';
 
 const { width, height } = Dimensions.get('window');
 const QUIZ_STORAGE_KEY = 'user_quiz_results';

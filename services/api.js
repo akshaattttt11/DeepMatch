@@ -1,6 +1,6 @@
 // API Service - Handles all communication with Flask Backend
 
-const API_BASE_URL = 'http://10.220.165.132:5000'; // Change this to your Flask server URL
+const API_BASE_URL = 'https://deepmatch.onrender.com'; // Change this to your Flask server URL
 
 class ApiService {
   constructor() {

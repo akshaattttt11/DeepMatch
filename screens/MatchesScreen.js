@@ -30,7 +30,7 @@ import { NSFWScannerWebView } from "../components/NSFWScannerWebView";
 
 
 // API Configuration
-const API_BASE_URL = 'http://10.220.165.132:5000';
+const API_BASE_URL = 'https://deepmatch.onrender.com';
 
 export default function MatchesScreen({ navigation }) {
   const [matches, setMatches] = useState([]);

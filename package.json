@@ -24,7 +24,7 @@
     "@react-navigation/native-stack": "^7.3.18",
     "@react-navigation/stack": "^7.4.2",
     "@tensorflow/tfjs": "^4.22.0",
-    "expo": "~54.0.32",
+    "expo": "~54.0.33",
     "expo-av": "~16.0.8",
     "expo-blur": "~15.0.8",
     "expo-clipboard": "~8.0.8",

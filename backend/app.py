@@ -1,18 +1,18 @@
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
-from flask_mail import Mail
-from flask_mail import Message as EmailMessage
 from werkzeug.security import generate_password_hash, check_password_hash
 import jwt
 from datetime import datetime, timedelta
 import os
+import requests
 import json
 import random
 import math
 import secrets
 from flask_socketio import SocketIO, emit, join_room, leave_room, rooms
 import pytz
+from email_service import send_verification_email_resend
 
 import logging
 import threading
@@ -85,16 +85,6 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 CORS(app)  # Enable CORS for React Native
 
-# Email Configuration
-app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
-app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', 587))
-app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'True').lower() in ['true', '1', 'yes']
-app.config['MAIL_USE_SSL'] = os.environ.get('MAIL_USE_SSL', 'False').lower() in ['true', '1', 'yes']
-app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME', '')
-app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD', '')
-app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', app.config['MAIL_USERNAME'])
-
-mail = Mail(app)
 
 # Try to load a pre-trained zodiac model if present
 ZODIAC_SIGNS = [
@@ -401,95 +391,12 @@ def generate_verification_token():
 
 # Helper function to send verification email
 def send_verification_email(user_email, username, token):
-    """Send email verification link to user"""
     try:
-        # Get the base URL from environment or use default
-        base_url = os.environ.get('APP_BASE_URL', 'https://deepmatch.onrender.com')
-        verification_url = f"{base_url}/api/verify-email?token={token}"
-        
-        # Create email message - use EmailMessage alias to avoid conflict with SQLAlchemy Message model
-        subject = 'Verify Your DeepMatch Account'
-        html_content = f"""
-            <html>
-            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-                <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-                    <h2 style="color: #10b981;">Welcome to DeepMatch, {username}!</h2>
-                    <p>Thank you for signing up. Please verify your email address to activate your account.</p>
-                    <div style="text-align: center; margin: 30px 0;">
-                        <a href="{verification_url}" 
-                           style="background-color: #10b981; color: white; padding: 12px 30px; 
-                                  text-decoration: none; border-radius: 5px; display: inline-block;">
-                            Verify Email Address
-                        </a>
-                    </div>
-                    <p>Or copy and paste this link into your browser:</p>
-                    <p style="word-break: break-all; color: #666;">{verification_url}</p>
-                    <p style="margin-top: 30px; font-size: 12px; color: #999;">
-                        This link will expire in 24 hours. If you didn't create an account, please ignore this email.
-                    </p>
-                </div>
-            </body>
-            </html>
-            """
-
-        # Fallback to SMTP via Flask-Mail
-        try:
-            msg = EmailMessage()
-            msg.recipients = [user_email]
-            msg.subject = subject
-            msg.html = html_content
-            msg.body = f"Welcome to DeepMatch, {username}!\n\nVerify here: {verification_url}\n\nThis link will expire in 24 hours."
-            mail.send(msg)
-            return True
-        except Exception as e:
-            print("Error sending verification email:", e)
-            import traceback
-            traceback.print_exc()
-            return False
+        return send_verification_email_resend(user_email, username, token)
     except Exception as e:
-        print(f"Error sending verification email: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        print("Resend email error:", e)
         return False
 
-
-# Admin test endpoint to send a one-off email from the deployed app.
-# Protected by TEST_EMAIL_SECRET environment variable (set this in Render).
-@app.route('/admin/test-email', methods=['POST'])
-def admin_test_email():
-    """
-    POST JSON: { "to": "you@example.com", "subject": "Test", "body": "Hello", "secret": "..." }
-    The request must include the correct secret matching TEST_EMAIL_SECRET env var.
-    """
-    try:
-        data = request.get_json() or {}
-        provided = data.get('secret') or request.headers.get('X-TEST-SECRET')
-        secret = os.environ.get('TEST_EMAIL_SECRET')
-        if not secret or provided != secret:
-            return jsonify({'error': 'Forbidden'}), 403
-
-        to = data.get('to')
-        if not to:
-            return jsonify({'error': 'Missing "to" address'}), 400
-
-        subject = data.get('subject', 'DeepMatch test email')
-        body = data.get('body', 'This is a test email from DeepMatch.')
-
-        msg = EmailMessage()
-        msg.recipients = [to]
-        msg.subject = subject
-        msg.body = body
-        msg.html = f"<p>{body}</p>"
-
-        try:
-            mail.send(msg)
-            return jsonify({'message': 'Test email sent'}), 200
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            return jsonify({'error': 'Failed to send', 'detail': str(e)}), 500
-    except Exception as e:
-        return jsonify({'error': 'Bad request', 'detail': str(e)}), 400
 
 # Compatibility Calculation Functions
 def calculate_mbti_compatibility(mbti1, mbti2):

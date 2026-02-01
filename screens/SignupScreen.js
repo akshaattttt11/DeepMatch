@@ -202,7 +202,7 @@ export default function SignupScreen({ navigation }) {
     }
     setCheckingEmail(true);
     try {
-      const response = await fetch(`http://10.220.165.132:5000/api/check-email?email=${encodeURIComponent(emailValue)}`, {
+      const response = await fetch(`https://deepmatch.onrender.com/api/check-email?email=${encodeURIComponent(emailValue)}`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -317,7 +317,7 @@ export default function SignupScreen({ navigation }) {
     setLoading(true);
     try {
       // Use your Flask backend
-      const response = await fetch('http://10.220.165.132:5000/api/register', {
+      const response = await fetch('https://deepmatch.onrender.com/api/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

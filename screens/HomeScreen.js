@@ -8,7 +8,7 @@ import MultiSlider from '@ptomasroos/react-native-multi-slider';
 import { getVerifiedLocation } from '../utils/locationService';
 
 // API Configuration
-const API_BASE_URL = 'http://10.220.165.132:5000';
+const API_BASE_URL = 'https://deepmatch.onrender.com';
  
 const { width } = Dimensions.get('window');
 
