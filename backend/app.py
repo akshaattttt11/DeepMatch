@@ -452,6 +452,45 @@ def send_verification_email(user_email, username, token):
         traceback.print_exc()
         return False
 
+
+# Admin test endpoint to send a one-off email from the deployed app.
+# Protected by TEST_EMAIL_SECRET environment variable (set this in Render).
+@app.route('/admin/test-email', methods=['POST'])
+def admin_test_email():
+    """
+    POST JSON: { "to": "you@example.com", "subject": "Test", "body": "Hello", "secret": "..." }
+    The request must include the correct secret matching TEST_EMAIL_SECRET env var.
+    """
+    try:
+        data = request.get_json() or {}
+        provided = data.get('secret') or request.headers.get('X-TEST-SECRET')
+        secret = os.environ.get('TEST_EMAIL_SECRET')
+        if not secret or provided != secret:
+            return jsonify({'error': 'Forbidden'}), 403
+
+        to = data.get('to')
+        if not to:
+            return jsonify({'error': 'Missing "to" address'}), 400
+
+        subject = data.get('subject', 'DeepMatch test email')
+        body = data.get('body', 'This is a test email from DeepMatch.')
+
+        msg = EmailMessage()
+        msg.recipients = [to]
+        msg.subject = subject
+        msg.body = body
+        msg.html = f"<p>{body}</p>"
+
+        try:
+            mail.send(msg)
+            return jsonify({'message': 'Test email sent'}), 200
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': 'Failed to send', 'detail': str(e)}), 500
+    except Exception as e:
+        return jsonify({'error': 'Bad request', 'detail': str(e)}), 400
+
 # Compatibility Calculation Functions
 def calculate_mbti_compatibility(mbti1, mbti2):
     """Calculate MBTI compatibility score (0-100)"""
