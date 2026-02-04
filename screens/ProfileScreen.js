@@ -877,6 +877,49 @@ export default function ProfileScreen() {
           <Text style={styles.quizButtonText}>Take Quiz</Text>
         </TouchableOpacity>
       </Animated.View>
+
+      {/* 🧩 BLOCKED USERS BUTTON */}
+<Animated.View
+  style={{
+    position: 'absolute',
+    bottom: 170, // 👈 sits above logout
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    opacity: editAnim,
+    transform: [{ scale: editAnim }],
+  }}
+>
+  <TouchableOpacity
+    onPress={() => navigation.navigate("BlockedUsers")}
+    style={{
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: '#27272a',
+      paddingHorizontal: 22,
+      paddingVertical: 12,
+      borderRadius: 24,
+    }}
+    activeOpacity={0.8}
+  >
+    <Ionicons
+      name="ban-outline"
+      size={20}
+      color="#f59e0b"
+    />
+    <Text
+      style={{
+        color: '#fff',
+        fontWeight: '600',
+        fontSize: 16,
+        marginLeft: 8,
+      }}
+    >
+      Blocked Users
+    </Text>
+  </TouchableOpacity>
+</Animated.View>
+
       <Animated.View style={{ position: 'absolute', bottom: 120, left: 0, right: 0, alignItems: 'center', opacity: logoutAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0.5] }) }}>
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout} activeOpacity={0.8}>
           <Ionicons name="log-out-outline" size={20} color="#ef4444" />

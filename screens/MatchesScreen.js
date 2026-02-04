@@ -14,6 +14,7 @@ import {
   Alert,
   Animated
 } from 'react-native';
+import { Menu, Divider } from "react-native-paper";
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import ConfettiCannon from 'react-native-confetti-cannon';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -31,6 +32,7 @@ import { NSFWScannerWebView } from "../components/NSFWScannerWebView";
 
 // API Configuration
 const API_BASE_URL = 'https://deepmatch.onrender.com';
+const ADMIN_EMAIL = 'deepmatch.noreply@gmail.com';
 
 export default function MatchesScreen({ navigation }) {
   const [matches, setMatches] = useState([]);
@@ -50,6 +52,11 @@ export default function MatchesScreen({ navigation }) {
   const [currentUser, setCurrentUser] = useState(null);
   const textInputRef = useRef(null);
   const [isOtherTyping, setIsOtherTyping] = useState(false);
+  const [menuVisible, setMenuVisible] = useState(null);
+  const [reportModalVisible, setReportModalVisible] = useState(false);
+  const [reportReason, setReportReason] = useState("");
+  const [reportTargetUser, setReportTargetUser] = useState(null);
+
 
 
 
@@ -887,6 +894,160 @@ useEffect(() => {
     }
   };
 
+  // =============================
+// 🚩 REPORT USER
+// =============================
+const handleReportUser = async (user) => {
+  Alert.alert(
+    "Report User",
+    "Do you want to report this user?",
+    [
+      { text: "Cancel" },
+      {
+        text: "Report",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            const token =
+              await AsyncStorage.getItem("auth_token");
+
+            await fetch(
+              `${API_BASE_URL}/api/report-user`,
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  reported_user_id: user.id,
+                  reason: "Reported via app",
+                }),
+              }
+            );
+
+            Alert.alert(
+              "Reported",
+              "Admin will review this user."
+            );
+
+          } catch {
+            Alert.alert(
+              "Error",
+              "Failed to report user."
+            );
+          }
+        },
+      },
+    ]
+  );
+};
+
+
+const submitReport = async () => {
+
+  // 🛡️ SAFETY GUARD — ADD THIS BLOCK
+  if (!reportTargetUser) {
+    Alert.alert("No user selected");
+    return;
+  }
+  
+  if (!reportReason.trim()) {
+    Alert.alert("Reason required");
+    return;
+  }
+
+  try {
+    const token = await AsyncStorage.getItem("auth_token");
+
+    const res = await fetch(
+      `${API_BASE_URL}/api/report-user`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          reported_user_id: reportTargetUser.id,
+          reason: reportReason,
+        }),
+      }
+    );
+
+    if (!res.ok) throw new Error();
+
+    Alert.alert(
+      "Report Submitted",
+      "Admin will review this report."
+    );
+
+    setReportModalVisible(false);
+    setReportReason("");
+    setReportTargetUser(null);
+
+  } catch {
+    Alert.alert("Failed to submit report");
+  }
+};
+
+
+
+// =============================
+// 🚫 BLOCK USER
+// =============================
+const handleBlockUser = async (user) => {
+  Alert.alert(
+    "Block User",
+    `Are you sure you want to block ${user.name}?`,
+    [
+      { text: "Cancel" },
+      {
+        text: "Block",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            const token =
+              await AsyncStorage.getItem("auth_token");
+
+            const res = await fetch(
+              `${API_BASE_URL}/api/block-user`,
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  blocked_user_id: user.id,
+                }),
+              }
+            );
+
+            if (!res.ok) throw new Error();
+
+            Alert.alert(
+              "Blocked",
+              "User has been blocked."
+            );
+
+            // Remove instantly from UI
+            setMatches(prev =>
+              prev.filter(m => m.id !== user.id)
+            );
+
+          } catch (e) {
+            Alert.alert(
+              "Error",
+              "Failed to block user."
+            );
+          }
+        },
+      },
+    ]
+  );
+};
+
   const renderMatch = ({ item }) => {
     const compatibility = getBestCompatibilityScore(item);
     const scoreColor = getScoreColor(compatibility.score);
@@ -947,13 +1108,46 @@ useEffect(() => {
           </Text>
         </View>
         
-        <TouchableOpacity 
-          style={styles.messageButton} 
-          activeOpacity={0.8}
-          onPress={() => openChat(item)}
-        >
-          <Ionicons name="chatbubble-outline" size={20} color="#10b981" />
-        </TouchableOpacity>
+        <View style={{ alignItems: "center" }}>
+
+  {/* 3 DOT MENU */}
+  <Menu
+    visible={menuVisible === item.id}
+    onDismiss={() => setMenuVisible(null)}
+    anchor={
+      <TouchableOpacity
+        onPress={() => setMenuVisible(item.id)}
+        style={{ padding: 6 }}
+      >
+        <Ionicons
+          name="ellipsis-vertical"
+          size={18}
+          color="#a3a3a3"
+        />
+      </TouchableOpacity>
+    }
+  >
+    <Menu.Item
+      onPress={() => {
+  setMenuVisible(null);
+  setReportTargetUser(item);
+  setReportModalVisible(true);
+}}
+      title="Report User"
+    />
+    <Divider />
+    <Menu.Item
+      onPress={() => handleBlockUser(item)}
+      title="Block User"
+    />
+  </Menu>
+
+  {/* ONLINE INDICATOR */}
+  {item.is_online && (
+    <View style={styles.onlineIndicator} />
+  )}
+
+</View>
       </TouchableOpacity>
     );
   };
@@ -1133,6 +1327,11 @@ useEffect(() => {
        isOtherTyping={isOtherTyping}
        currentUser={currentUser}
        navigation={navigation}
+       menuVisible={menuVisible}
+       setMenuVisible={setMenuVisible}
+       setReportTargetUser={setReportTargetUser}
+       setReportModalVisible={setReportModalVisible}
+       handleBlockUser={handleBlockUser}
      />
     </SafeAreaView>
   );
@@ -1141,6 +1340,79 @@ useEffect(() => {
   return (
     <SafeAreaView style={styles.container}>
       <MatchModal />
+
+      {/* 🚩 REPORT USER MODAL — ADD HERE */}
+    <Modal
+      isVisible={reportModalVisible}
+      onBackdropPress={() => setReportModalVisible(false)}
+    >
+      <View
+        style={{
+          backgroundColor: "#1f1f1f",
+          padding: 18,
+          borderRadius: 12,
+        }}
+      >
+        <Text
+          style={{
+            color: "#fff",
+            fontSize: 18,
+            fontWeight: "700",
+            marginBottom: 10,
+          }}
+        >
+          Report User
+        </Text>
+
+        <TextInput
+          placeholder="Why are you reporting this user?"
+          placeholderTextColor="#9ca3af"
+          value={reportReason}
+          onChangeText={setReportReason}
+          multiline
+          style={{
+            backgroundColor: "#27272a",
+            color: "#fff",
+            padding: 12,
+            borderRadius: 8,
+            minHeight: 80,
+            marginBottom: 14,
+          }}
+        />
+
+        <View
+          style={{
+            flexDirection: "row",
+            justifyContent: "flex-end",
+          }}
+        >
+          <TouchableOpacity
+            onPress={() => setReportModalVisible(false)}
+          >
+            <Text
+              style={{
+                color: "#9ca3af",
+                marginRight: 18,
+              }}
+            >
+              Cancel
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={submitReport}>
+            <Text
+              style={{
+                color: "#ef4444",
+                fontWeight: "600",
+              }}
+            >
+              Submit
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Your Matches</Text>
         <View style={styles.headerActions}>
@@ -1163,6 +1435,14 @@ useEffect(() => {
           >
             <Ionicons name="refresh" size={24} color="#10b981" />
           </TouchableOpacity>
+          {currentUser && (currentUser.email === ADMIN_EMAIL || currentUser.is_admin) && (
+            <TouchableOpacity
+              style={[styles.refreshButton, { marginLeft: 8 }]}
+              onPress={() => navigation.navigate('AdminReports')}
+            >
+              <Ionicons name="shield-checkmark" size={22} color="#10b981" />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
@@ -1284,7 +1564,12 @@ const ChatInterface = ({
   loadMessages,
   isOtherTyping,
   currentUser,
-  navigation
+  navigation,
+  menuVisible,
+  setMenuVisible,
+  setReportTargetUser,
+  setReportModalVisible,
+  handleBlockUser
 }) => {
   const typingTimeoutRef = useRef(null);
   const textInputRef = useRef(null);
@@ -1609,7 +1894,6 @@ const uploadMedia = async (uri, type, base64Override = null) => {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
-        "Content-Type": "multipart/form-data",
       },
       body: form,
     });
@@ -1680,37 +1964,81 @@ const canEdit =
       />
       <View style={styles.chatContainer}>
         {/* Header */}
-        <View style={styles.chatHeader}>
-          <TouchableOpacity onPress={closeChat} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color="#fff" />
-          </TouchableOpacity>
+          <View style={styles.chatHeader}>
+  {/* BACK BUTTON */}
+  <TouchableOpacity onPress={closeChat} style={styles.backButton}>
+    <Ionicons name="arrow-back" size={24} color="#fff" />
+  </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.chatUserInfo}
-            activeOpacity={0.7}
-            onPress={() => navigation.navigate('ProfileDetail', { userId: selectedMatch.id || selectedMatch.userId || selectedMatch.user_id })}
-          >
-            <Image
-              source={{ uri: selectedMatch.profile_picture }}
-              style={styles.chatUserImage}
-            />
-            <View>
-              <Text style={styles.chatUserName}>{selectedMatch.name}</Text>
-              <Text style={styles.chatUserStatus}>
-                {selectedMatch.is_online
-                  ? 'Online'
-                  : `Last seen ${selectedMatch.last_seen}`}
-              </Text>
-            </View>
-          </TouchableOpacity>
+  {/* USER INFO */}
+  <TouchableOpacity
+    style={styles.chatUserInfo}
+    activeOpacity={0.7}
+    onPress={() =>
+      navigation.navigate("ProfileDetail", {
+        userId:
+          selectedMatch.id ||
+          selectedMatch.userId ||
+          selectedMatch.user_id,
+      })
+    }
+  >
+    <Image
+      source={{ uri: selectedMatch.profile_picture }}
+      style={styles.chatUserImage}
+    />
 
-          <TouchableOpacity
-            onPress={() => loadMessages(matchIdToUse)}
-            style={styles.refreshButton}
-          >
-            <Ionicons name="refresh" size={20} color="#fff" />
-          </TouchableOpacity>
-        </View>
+    <View>
+      <Text style={styles.chatUserName}>
+        {selectedMatch.name}
+      </Text>
+
+      <Text style={styles.chatUserStatus}>
+        {selectedMatch.is_online
+          ? "Online"
+          : `Last seen ${selectedMatch.last_seen}`}
+      </Text>
+    </View>
+  </TouchableOpacity>
+
+  {/* 3 DOT MENU */}
+  <Menu
+    visible={menuVisible === "chat"}
+    onDismiss={() => setMenuVisible(null)}
+    anchor={
+      <TouchableOpacity
+        onPress={() => setMenuVisible("chat")}
+        style={{ padding: 6 }}
+      >
+        <Ionicons
+          name="ellipsis-vertical"
+          size={20}
+          color="#fff"
+        />
+      </TouchableOpacity>
+    }
+  >
+    <Menu.Item
+      title="Report User"
+      onPress={() => {
+        setMenuVisible(null);
+        setReportTargetUser(selectedMatch);
+        setReportModalVisible(true);
+      }}
+    />
+
+    <Divider />
+
+    <Menu.Item
+      title="Block User"
+      onPress={() => {
+        setMenuVisible(null);
+        handleBlockUser(selectedMatch);
+      }}
+    />
+  </Menu>
+</View>
+
 
         {/* Messages */}
 <FlatList
