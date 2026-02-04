@@ -526,22 +526,63 @@ export default function ProfileScreen() {
   };
 
   const pickImage = async () => {
-    try {
-      let result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 1,
+  try {
+    let result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+
+    if (!result.canceled) {
+      const uri = result.assets[0].uri;
+
+      // 🔐 Get auth token
+      const token = await AsyncStorage.getItem('auth_token');
+
+      // 📦 Prepare form data
+      const formData = new FormData();
+      formData.append("file", {
+        uri,
+        name: "profile.jpg",
+        type: "image/jpeg",
       });
-      
-      if (!result.canceled) {
-        setEditProfile({ ...editProfile, profile_picture: result.assets[0].uri });
+      formData.append("type", "image");
+
+      // 🚀 Upload to Flask → Cloudinary
+      const response = await fetch(
+        `${API_BASE_URL}/api/messages/upload`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "multipart/form-data",
+          },
+          body: formData,
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Upload failed");
       }
-    } catch (error) {
-      console.error('Failed to pick image:', error);
-      Alert.alert('Error', 'Failed to pick image. Please try again.');
+
+      // ✅ Save Cloudinary URL (NOT local URI)
+      setEditProfile({
+        ...editProfile,
+        profile_picture: data.url,
+      });
+
+      Alert.alert("Success", "Profile picture uploaded!");
+
     }
-  };
+  } catch (error) {
+    console.error("Image upload error:", error);
+    Alert.alert("Error", "Failed to upload image. Please try again.");
+  }
+};
+
 
   const handleLogout = async () => {
     try {

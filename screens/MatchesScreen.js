@@ -1821,7 +1821,7 @@ const canEdit =
 >
   {item.type === 'image' && item.media_url && !isGone ? (
     <Image
-      source={{ uri: API_BASE_URL + item.media_url }}
+      source={{ uri: item.media_url }}
       style={{ width: 220, height: 220, borderRadius: 12 }}
     />
   ) : isGone ? (

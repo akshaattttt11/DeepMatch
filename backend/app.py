@@ -4,6 +4,8 @@ from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 import jwt
 from datetime import datetime, timedelta
+import cloudinary
+import cloudinary.uploader
 import os
 import requests
 import json
@@ -31,6 +33,14 @@ try:
     load_dotenv()
 except ImportError:
     pass  # dotenv not installed, skip
+
+# Cloudinary Configuration
+cloudinary.config(
+    cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
+    api_key=os.getenv("CLOUDINARY_API_KEY"),
+    api_secret=os.getenv("CLOUDINARY_API_SECRET"),
+    secure=True
+)
 
 # Optional: ML model for zodiac compatibility (loaded if available)
 try:
@@ -2351,6 +2361,7 @@ def handle_seen_message(data):
 def upload_media():
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     user_id = verify_token(token)
+
     if not user_id:
         return jsonify({"error": "Unauthorized"}), 401
 
@@ -2360,77 +2371,52 @@ def upload_media():
     file = request.files["file"]
     media_type = request.form.get("type")
 
-    # Only scan images
-    if media_type == "image":
-        # Save file temporarily for scanning
+    try:
+        # 📂 Create temp folder if needed
+        os.makedirs("temp_uploads", exist_ok=True)
+
+        # Save temp file for NSFW scanning
         temp_filename = f"temp_{int(datetime.utcnow().timestamp())}_{file.filename}"
-        temp_path = os.path.join("uploads", temp_filename)
-        os.makedirs("uploads", exist_ok=True)
+        temp_path = os.path.join("temp_uploads", temp_filename)
         file.save(temp_path)
-        
-        try:
-            # Scan image for NSFW content (real model if available)
+
+        # 🔍 NSFW Scan (images only)
+        if media_type == "image":
             is_nsfw, confidence, details = scan_image_nsfw(temp_path)
-            
+
             if is_nsfw:
-                # Delete the file
-                try:
-                    os.remove(temp_path)
-                except:
-                    pass
-                
+                os.remove(temp_path)
                 return jsonify({
                     "error": "NSFW_CONTENT_DETECTED",
-                    "message": f"Inappropriate content detected (confidence: {confidence:.1%}). This image cannot be uploaded.",
                     "confidence": confidence,
                     "details": details
                 }), 403
-            
-            # Image is safe, rename to final filename
-            filename = f"{int(datetime.utcnow().timestamp())}_{file.filename}"
-            final_path = os.path.join("uploads", filename)
-            os.rename(temp_path, final_path)
-            
-            return jsonify({
-                "url": f"/uploads/{filename}",
-                "type": media_type,
-                "nsfw_checked": True,
-                "confidence": confidence
-            })
-            
-        except Exception as e:
-            print(f"Error during NSFW scan: {str(e)}")
-            # If scanning fails, allow upload (fail-open)
-            # In production, you might want to fail-closed
-            filename = f"{int(datetime.utcnow().timestamp())}_{file.filename}"
-            final_path = os.path.join("uploads", filename)
-            try:
-                if os.path.exists(temp_path):
-                    os.rename(temp_path, final_path)
-                else:
-                    file.seek(0)  # Reset file pointer
-                    file.save(final_path)
-            except:
-                file.seek(0)
-                file.save(final_path)
-            
-            return jsonify({
-                "url": f"/uploads/{filename}",
-                "type": media_type,
-                "nsfw_checked": False,
-                "warning": "Scan failed, upload allowed"
-            })
-    else:
-        # For non-image files, upload directly
-        filename = f"{int(datetime.utcnow().timestamp())}_{file.filename}"
-        os.makedirs("uploads", exist_ok=True)
-        path = os.path.join("uploads", filename)
-        file.save(path)
+
+        # ☁️ Upload to Cloudinary
+        upload_result = cloudinary.uploader.upload(
+            temp_path,
+            folder="deepmatch_media",
+            resource_type="auto"  # supports image/audio/video
+        )
+
+        # Delete temp file after upload
+        os.remove(temp_path)
+
+        media_url = upload_result["secure_url"]
 
         return jsonify({
-            "url": f"/uploads/{filename}",
-            "type": media_type
+            "url": media_url,
+            "type": media_type,
+            "cloudinary": True
         })
+
+    except Exception as e:
+        print(f"Upload error: {str(e)}")
+        return jsonify({
+            "error": "Upload failed",
+            "details": str(e)
+        }), 500
+
 
 
 if __name__ == '__main__':
