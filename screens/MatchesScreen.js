@@ -597,34 +597,54 @@ useEffect(() => {
 
 
   const openChat = async (match) => {
-  try {
-    setSelectedMatch(match);
-    setShowChat(true);
+    try {
+      // Basic sanity check
+      if (!match) {
+        Alert.alert("Error", "Match data is missing.");
+        return;
+      }
 
-    const matchIdToUse = match.matchId || match.id;
+      const matchIdToUse = match.matchId || match.match_id || match.id;
+      if (!matchIdToUse) {
+        console.error("openChat: missing matchId for match", match);
+        Alert.alert("Error", "Chat cannot be opened for this match.");
+        return;
+      }
 
-    const socket = getSocket();
-    const room = `match_${matchIdToUse}`;
+      setSelectedMatch(match);
+      setShowChat(true);
 
-    // 2️⃣ Load messages
-    await loadMessages(matchIdToUse);
+      // Load messages for this match
+      await loadMessages(matchIdToUse);
 
-    const token = await AsyncStorage.getItem('auth_token');
+      // Mark messages as read
+      const token = await AsyncStorage.getItem("auth_token");
+      if (token) {
+        try {
+          await fetch(`${API_BASE_URL}/api/messages/${matchIdToUse}/mark-read`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+        } catch (markErr) {
+          console.error("mark-read error (non-fatal):", markErr);
+        }
+      }
 
-    await fetch(`${API_BASE_URL}/api/messages/${matchIdToUse}/mark-read`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-
-    // 4️⃣ Notify sender in real-time
-    socket.emit("seen_message", { room });
-
-  } catch (error) {
-    console.error('Error opening chat:', error);
-  }
-};
+      // Notify via socket if available
+      const socket = getSocket();
+      if (socket && socket.emit) {
+        const room = `match_${matchIdToUse}`;
+        socket.emit("seen_message", { room });
+      } else {
+        console.log("openChat: socket not ready, skipping seen_message emit");
+      }
+    } catch (error) {
+      console.error("Error opening chat:", error);
+      Alert.alert("Error", "Failed to open chat. Please try again.");
+    }
+  };
 
   const loadMessages = async (matchId) => {
   try {
