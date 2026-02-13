@@ -2046,84 +2046,99 @@ const canEdit =
     </View>
   </TouchableOpacity>
 
-  {/* 3 DOT MENU */}
-  <Menu
-    visible={menuVisible === "chat"}
-    onDismiss={() => {
-      try {
-        setMenuVisible(null);
-      } catch (e) {
-        console.error("Chat menu dismiss error:", e);
+  {/* REFRESH + 3 DOT MENU */}
+  <View style={{ flexDirection: "row", alignItems: "center" }}>
+    {/* Refresh chat messages */}
+    <TouchableOpacity
+      style={{ padding: 6, marginRight: 2 }}
+      onPress={() => {
+        if (!selectedMatch?.matchId && !selectedMatch?.match_id) return;
+        const matchIdToUse = selectedMatch.matchId || selectedMatch.match_id;
+        loadMessages(matchIdToUse);
+      }}
+    >
+      <Ionicons name="refresh" size={20} color="#10b981" />
+    </TouchableOpacity>
+
+    {/* 3 DOT MENU */}
+    <Menu
+      visible={menuVisible === "chat"}
+      onDismiss={() => {
+        try {
+          setMenuVisible(null);
+        } catch (e) {
+          console.error("Chat menu dismiss error:", e);
+        }
+      }}
+      anchor={
+        <TouchableOpacity
+          onPress={() => {
+            try {
+              setMenuVisible("chat");
+            } catch (e) {
+              console.error("Chat menu open error:", e);
+              // Fallback: show action sheet if Menu fails
+              Alert.alert(
+                "Options",
+                `Actions for ${selectedMatch.name}`,
+                [
+                  {
+                    text: "Report User",
+                    onPress: () => {
+                      setReportTargetUser(selectedMatch);
+                      setReportModalVisible(true);
+                    },
+                  },
+                  {
+                    text: "Block User",
+                    style: "destructive",
+                    onPress: () => handleBlockUser(selectedMatch),
+                  },
+                  { text: "Cancel", style: "cancel" },
+                ]
+              );
+            }
+          }}
+          style={{ padding: 6 }}
+        >
+          <Ionicons
+            name="ellipsis-vertical"
+            size={20}
+            color="#fff"
+          />
+        </TouchableOpacity>
       }
-    }}
-    anchor={
-      <TouchableOpacity
+    >
+      <Menu.Item
+        title="Report User"
         onPress={() => {
           try {
-            setMenuVisible("chat");
+            setMenuVisible(null);
+            setReportTargetUser(selectedMatch);
+            setReportModalVisible(true);
           } catch (e) {
-            console.error("Chat menu open error:", e);
-            // Fallback: show action sheet if Menu fails
-            Alert.alert(
-              "Options",
-              `Actions for ${selectedMatch.name}`,
-              [
-                {
-                  text: "Report User",
-                  onPress: () => {
-                    setReportTargetUser(selectedMatch);
-                    setReportModalVisible(true);
-                  },
-                },
-                {
-                  text: "Block User",
-                  style: "destructive",
-                  onPress: () => handleBlockUser(selectedMatch),
-                },
-                { text: "Cancel", style: "cancel" },
-              ]
-            );
+            console.error("Report menu error:", e);
+            Alert.alert("Error", "Failed to open report menu");
           }
         }}
-        style={{ padding: 6 }}
-      >
-        <Ionicons
-          name="ellipsis-vertical"
-          size={20}
-          color="#fff"
-        />
-      </TouchableOpacity>
-    }
-  >
-    <Menu.Item
-      title="Report User"
-      onPress={() => {
-        try {
-          setMenuVisible(null);
-          setReportTargetUser(selectedMatch);
-          setReportModalVisible(true);
-        } catch (e) {
-          console.error("Report menu error:", e);
-          Alert.alert("Error", "Failed to open report menu");
-        }
-      }}
-    />
+      />
 
-    <Divider />
+      <Divider />
 
-    <Menu.Item
-      title="Block User"
-      onPress={() => {
-        try {
-          setMenuVisible(null);
-          handleBlockUser(selectedMatch);
-        } catch (e) {
-          console.error("Block menu error:", e);
-          Alert.alert("Error", "Failed to block user");
-        }
-      }}
-    />
-  </Menu>
+      <Menu.Item
+        title="Block User"
+        onPress={() => {
+          try {
+            setMenuVisible(null);
+            handleBlockUser(selectedMatch);
+          } catch (e) {
+            console.error("Block menu error:", e);
+            Alert.alert("Error", "Failed to block user");
+          }
+        }}
+      />
+    </Menu>
+  </View>
 </View>
 
 
