@@ -9,6 +9,8 @@ import cloudinary.uploader
 import os
 import requests
 import json
+import smtplib
+from email.message import EmailMessage
 import random
 import math
 import secrets
@@ -188,6 +190,12 @@ class User(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     is_online = db.Column(db.Boolean, default=False)
     last_seen = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Admin / moderation flags
+    is_admin = db.Column(db.Boolean, default=False)
+    is_banned = db.Column(db.Boolean, default=False)
+    ban_reason = db.Column(db.Text, nullable=True)
+    banned_at = db.Column(db.DateTime, nullable=True)
 
     # Profile information
     first_name = db.Column(db.String(50))
@@ -378,6 +386,41 @@ class Notification(db.Model):
     is_read = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+# =============================
+# 🚨 REPORT SYSTEM
+# =============================
+
+class UserReport(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    reporter_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    reported_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    reason = db.Column(db.Text, nullable=False)
+    status = db.Column(db.String(20), default="pending")  # pending | resolved
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+# =============================
+# 🚫 BLOCK SYSTEM
+# =============================
+
+class UserBlock(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    blocker_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    blocked_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+# Admin actions / audit trail
+class AdminAction(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    admin_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    action = db.Column(db.String(50))  # 'resolve_report', 'ban_user', 'unban_user'
+    target_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    report_id = db.Column(db.Integer, db.ForeignKey('user_report.id'), nullable=True)
+    note = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
 # Helper function to generate JWT token
 def generate_token(user_id):
     payload = {
@@ -406,6 +449,46 @@ def send_verification_email(user_email, username, token):
     except Exception as e:
         print("Resend email error:", e)
         return False
+
+
+def send_admin_notification(reporter_id, reported_user_id, reason, report_id=None):
+    """Notify admin email about a new report. Attempts SMTP if configured, otherwise logs."""
+    admin_email = os.environ.get("ADMIN_EMAIL", "deepmatch.noreply@gmail.com")
+
+    try:
+        reporter = db.session.get(User, reporter_id)
+        reported = db.session.get(User, reported_user_id)
+    except Exception:
+        reporter = None
+        reported = None
+
+    subject = f"[DeepMatch] New user report #{report_id or 'N/A'}"
+    body_lines = [
+        f"Reporter: {reporter.email if reporter else reporter_id}",
+        f"Reported user: {reported.email if reported else reported_user_id}",
+        "",
+        "Reason:",
+        reason,
+        "",
+        f"Report ID: {report_id or 'N/A'}",
+    ]
+    body = "\n".join(body_lines)
+
+    # Use Resend helper (send_verification_email_resend) — preferred for deployment where SMTP is blocked.
+    try:
+        # send_verification_email_resend(email, subject_or_username, body_or_token)
+        send_verification_email_resend(admin_email, subject, body)
+        print(f"✅ Admin notification sent to {admin_email} via Resend helper")
+        return True
+    except Exception as e:
+        print(f"⚠️ Failed to send admin notification via Resend helper: {e}")
+
+    # Last resort: log to console
+    print("=== ADMIN REPORT NOTIFICATION (FALLBACK LOG) ===")
+    print(subject)
+    print(body)
+    print("=== END ===")
+    return False
 
 
 # Compatibility Calculation Functions
@@ -677,6 +760,13 @@ def login():
                     'error': 'EMAIL_NOT_VERIFIED',
                     'message': 'Please verify your email address before logging in. Check your inbox for the verification link.',
                     'email': user.email
+                }), 403
+            
+            # Check if banned
+            if getattr(user, "is_banned", False):
+                return jsonify({
+                    'error': 'USER_BANNED',
+                    'message': 'This account has been banned. Contact support for more information.'
                 }), 403
             
             token = generate_token(user.id)
@@ -1062,15 +1152,23 @@ def get_matches():
     ).all()
     
     match_list = []
+
     for match in matches:
         # Get the other user in the match
         other_user_id = match.user2_id if match.user1_id == user_id else match.user1_id
         other_user = db.session.get(User, other_user_id)
-        
+
+        # 🚫 BLOCK FILTER (FIXED — INSIDE LOOP)
+        is_blocked = UserBlock.query.filter(
+            ((UserBlock.blocker_id == user_id) & (UserBlock.blocked_user_id == other_user_id)) |
+            ((UserBlock.blocker_id == other_user_id) & (UserBlock.blocked_user_id == user_id))
+        ).first()
+
+        if is_blocked:
+            continue
+
         if other_user:
             # Check if there's an unread like/rose notification for this user
-            # If there is, it means the match was auto-created before acceptance was required
-            # This should not happen with the new code, but filter it out as a safeguard
             pending_notification = Notification.query.filter_by(
                 user_id=user_id,
                 from_user_id=other_user_id,
@@ -1087,8 +1185,7 @@ def get_matches():
                     is_read=False
                 ).first()
             
-            # Only include match if there's no pending notification
-            # This ensures matches only appear after explicit acceptance
+            # Only include match if no pending notification
             if not pending_notification:
                 match_list.append({
                     'match_id': match.id,
@@ -1103,6 +1200,7 @@ def get_matches():
                 })
     
     return jsonify({'matches': match_list})
+
 
 @app.route('/api/messages/<int:match_id>', methods=['GET'])
 def get_messages(match_id):
@@ -1216,7 +1314,7 @@ def send_message():
     media_url = data.get('media_url')      # for image / audio
     msg_type = data.get('type', 'text')    # text | image | audio
 
-    # ✅ VALIDATION (very important)
+    # ✅ VALIDATION
     if not receiver_id:
         return jsonify({'error': 'receiver_id is required'}), 400
 
@@ -1226,7 +1324,24 @@ def send_message():
     if msg_type in ['image', 'audio'] and not media_url:
         return jsonify({'error': 'media_url is required for media messages'}), 400
 
-    # ✅ Verify match exists
+
+    # ============================================================
+    # 🚫 BLOCK CHECK (NEW — STEP 6)
+    # ============================================================
+    is_blocked = UserBlock.query.filter(
+        ((UserBlock.blocker_id == user_id) & (UserBlock.blocked_user_id == receiver_id)) |
+        ((UserBlock.blocker_id == receiver_id) & (UserBlock.blocked_user_id == user_id))
+    ).first()
+
+    if is_blocked:
+        return jsonify({
+            "error": "You cannot message this user"
+        }), 403
+
+
+    # ============================================================
+    # ✅ VERIFY MATCH EXISTS
+    # ============================================================
     match = Match.query.filter(
         ((Match.user1_id == user_id) & (Match.user2_id == receiver_id)) |
         ((Match.user1_id == receiver_id) & (Match.user2_id == user_id)),
@@ -1236,11 +1351,17 @@ def send_message():
     if not match:
         return jsonify({'error': 'Users are not matched'}), 400
 
-    # ✅ Use IST time (same as before)
+
+    # ============================================================
+    # 🕒 USE IST TIME
+    # ============================================================
     ist = pytz.timezone("Asia/Kolkata")
     sent_at = datetime.now(ist).replace(tzinfo=None)
 
-    # ✅ CREATE MESSAGE (text OR media)
+
+    # ============================================================
+    # 💬 CREATE MESSAGE
+    # ============================================================
     message = Message(
         sender_id=user_id,
         receiver_id=receiver_id,
@@ -1249,13 +1370,16 @@ def send_message():
         is_delivered=False,
         is_read=False,
         type=msg_type,
-        reply_to=json.dumps(reply_to) if reply_to else None 
+        reply_to=json.dumps(reply_to) if reply_to else None
     )
 
     db.session.add(message)
     db.session.commit()
 
-    # ✅ REAL-TIME SOCKET EMIT
+
+    # ============================================================
+    # ⚡ REAL-TIME SOCKET EMIT
+    # ============================================================
     room = f"match_{match.id}"
 
     socketio.emit(
@@ -1283,6 +1407,7 @@ def send_message():
         'sent_at': sent_at.isoformat(),
         'type': msg_type
     }), 201
+
 
 
 @app.route('/api/messages/<int:message_id>/delete', methods=['POST'])
@@ -2098,10 +2223,328 @@ def resend_verification():
         print(f'Resend verification error: {str(e)}')
         return jsonify({'error': 'An error occurred. Please try again.'}), 500
 
+# =============================
+# 🚨 REPORT USER
+# =============================
+@app.route("/api/report-user", methods=["POST"])
+def report_user():
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    reporter_id = verify_token(token)
+
+    if not reporter_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = request.get_json()
+    reported_user_id = data.get("reported_user_id")
+    reason = data.get("reason")
+
+    if not reported_user_id or not reason:
+        return jsonify({"error": "Missing fields"}), 400
+
+    report = UserReport(
+        reporter_id=reporter_id,
+        reported_user_id=reported_user_id,
+        reason=reason
+    )
+
+    db.session.add(report)
+    db.session.commit()
+    # Notify admin (best-effort)
+    try:
+        send_admin_notification(report.reporter_id, report.reported_user_id, report.reason, report.id)
+    except Exception as e:
+        print(f"⚠️ send_admin_notification error: {e}")
+
+    return jsonify({"message": "User reported successfully", "report_id": report.id})
+
+# =============================
+# 🚫 BLOCK USER
+# =============================
+@app.route("/api/block-user", methods=["POST"])
+def block_user():
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    blocker_id = verify_token(token)
+
+    if not blocker_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = request.get_json()
+    blocked_user_id = data.get("blocked_user_id")
+
+    if not blocked_user_id:
+        return jsonify({"error": "User ID required"}), 400
+
+    # Check already blocked
+    existing = UserBlock.query.filter_by(
+        blocker_id=blocker_id,
+        blocked_user_id=blocked_user_id
+    ).first()
+
+    if existing:
+        return jsonify({"message": "User already blocked"})
+
+    block = UserBlock(
+        blocker_id=blocker_id,
+        blocked_user_id=blocked_user_id
+    )
+
+    db.session.add(block)
+
+    # 🔥 Deactivate match if exists
+    match = Match.query.filter(
+        ((Match.user1_id == blocker_id) & (Match.user2_id == blocked_user_id)) |
+        ((Match.user1_id == blocked_user_id) & (Match.user2_id == blocker_id))
+    ).first()
+
+    if match:
+        match.is_active = False
+
+    db.session.commit()
+
+    return jsonify({"message": "User blocked successfully"})
+
+# =============================
+# 📋 GET BLOCKED USERS LIST
+# =============================
+@app.route("/api/blocked-users", methods=["GET"])
+def get_blocked_users():
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    blocker_id = verify_token(token)
+
+    if not blocker_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    blocks = UserBlock.query.filter_by(blocker_id=blocker_id).all()
+    
+    user_list = []
+    for block in blocks:
+        blocked_user = db.session.get(User, block.blocked_user_id)
+        if blocked_user:
+            user_list.append({
+                "id": blocked_user.id,
+                "name": f"{blocked_user.first_name} {blocked_user.last_name}".strip() or blocked_user.username,
+                "profile_picture": blocked_user.profile_picture or "https://ui-avatars.com/api/?name=User&background=10b981&color=fff",
+            })
+    
+    return jsonify({"users": user_list})
+
+
+# =============================
+# 🔓 UNBLOCK USER
+# =============================
+@app.route("/api/unblock-user", methods=["POST"])
+def unblock_user():
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    blocker_id = verify_token(token)
+
+    if not blocker_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = request.get_json()
+    blocked_user_id = data.get("blocked_user_id")
+
+    block = UserBlock.query.filter_by(
+        blocker_id=blocker_id,
+        blocked_user_id=blocked_user_id
+    ).first()
+
+    if not block:
+        return jsonify({"error": "Block not found"}), 404
+
+    db.session.delete(block)
+    db.session.commit()
+
+    return jsonify({"message": "User unblocked"})
+
+
+# =============================
+# 🛡️ ADMIN — VIEW REPORTS
+# =============================
+@app.route("/api/admin/reports", methods=["GET"])
+def admin_reports():
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    user_id = verify_token(token)
+
+    user = db.session.get(User, user_id)
+
+    admin_email = os.environ.get("ADMIN_EMAIL", "deepmatch.noreply@gmail.com")
+    if not user or (not getattr(user, "is_admin", False) and user.email != admin_email):
+        return jsonify({"error": "Admin access required"}), 403
+
+    reports = UserReport.query.order_by(UserReport.created_at.desc()).all()
+
+    report_list = []
+
+    for r in reports:
+        reporter = db.session.get(User, r.reporter_id)
+        reported = db.session.get(User, r.reported_user_id)
+
+        report_list.append({
+            "id": r.id,
+            "reporter": reporter.username if reporter else None,
+            "reporter_id": reporter.id if reporter else r.reporter_id,
+            "reporter_email": reporter.email if reporter else None,
+            "reported": reported.username if reported else None,
+            "reported_id": reported.id if reported else r.reported_user_id,
+            "reported_email": reported.email if reported else None,
+            "reported_is_banned": getattr(reported, "is_banned", False) if reported else False,
+            "reason": r.reason,
+            "status": r.status,
+            "created_at": r.created_at.isoformat()
+        })
+
+    return jsonify({"reports": report_list})
+
+
+# =============================
+# ✅ RESOLVE REPORT
+# =============================
+@app.route("/api/admin/reports/<int:report_id>/resolve", methods=["POST"])
+def resolve_report(report_id):
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    user_id = verify_token(token)
+
+    user = db.session.get(User, user_id)
+
+    admin_email = os.environ.get("ADMIN_EMAIL", "deepmatch.noreply@gmail.com")
+    if not user or (not getattr(user, "is_admin", False) and user.email != admin_email):
+        return jsonify({"error": "Admin access required"}), 403
+
+    report = UserReport.query.get(report_id)
+    if not report:
+        return jsonify({"error": "Report not found"}), 404
+
+    data = request.get_json() or {}
+    ban_user = bool(data.get("ban", False))
+    admin_note = data.get("admin_note")
+
+    report.status = "resolved"
+    db.session.add(report)
+
+    # If admin requested ban, perform ban on reported user
+    if ban_user:
+        reported = db.session.get(User, report.reported_user_id)
+        if reported:
+            reported.is_banned = True
+            reported.ban_reason = admin_note or "Banned by admin review"
+            reported.banned_at = datetime.utcnow()
+            db.session.add(reported)
+
+            # Deactivate any matches involving this user
+            matches = Match.query.filter(
+                (Match.user1_id == reported.id) | (Match.user2_id == reported.id)
+            ).all()
+            for m in matches:
+                m.is_active = False
+                db.session.add(m)
+
+            # Record admin action
+            action = AdminAction(
+                admin_id=user.id,
+                action="ban_user",
+                target_user_id=reported.id,
+                report_id=report.id,
+                note=admin_note
+            )
+            db.session.add(action)
+
+    # Record resolve action
+    resolve_action = AdminAction(
+        admin_id=user.id,
+        action="resolve_report",
+        target_user_id=report.reported_user_id,
+        report_id=report.id,
+        note=admin_note
+    )
+    db.session.add(resolve_action)
+
+    db.session.commit()
+
+    return jsonify({"message": "Report resolved", "ban_performed": ban_user})
+
+
+# =============================
+# ✅ ADMIN — BAN / UNBAN USER
+# =============================
+@app.route("/api/admin/users/<int:target_user_id>/ban", methods=["POST"])
+def admin_ban_user(target_user_id):
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    user_id = verify_token(token)
+
+    user = db.session.get(User, user_id)
+    admin_email = os.environ.get("ADMIN_EMAIL", "deepmatch.noreply@gmail.com")
+    if not user or (not getattr(user, "is_admin", False) and user.email != admin_email):
+        return jsonify({"error": "Admin access required"}), 403
+
+    target = db.session.get(User, target_user_id)
+    if not target:
+        return jsonify({"error": "User not found"}), 404
+
+    data = request.get_json() or {}
+    reason = data.get("reason", "Banned by admin")
+
+    target.is_banned = True
+    target.ban_reason = reason
+    target.banned_at = datetime.utcnow()
+    db.session.add(target)
+
+    # Deactivate matches involving this user
+    matches = Match.query.filter(
+        (Match.user1_id == target.id) | (Match.user2_id == target.id)
+    ).all()
+    for m in matches:
+        m.is_active = False
+        db.session.add(m)
+
+    action = AdminAction(
+        admin_id=user.id,
+        action="ban_user",
+        target_user_id=target.id,
+        note=reason
+    )
+    db.session.add(action)
+    db.session.commit()
+
+    return jsonify({"message": "User banned", "user_id": target.id})
+
+
+@app.route("/api/admin/users/<int:target_user_id>/unban", methods=["POST"])
+def admin_unban_user(target_user_id):
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    user_id = verify_token(token)
+
+    user = db.session.get(User, user_id)
+    admin_email = os.environ.get("ADMIN_EMAIL", "deepmatch.noreply@gmail.com")
+    if not user or (not getattr(user, "is_admin", False) and user.email != admin_email):
+        return jsonify({"error": "Admin access required"}), 403
+
+    target = db.session.get(User, target_user_id)
+    if not target:
+        return jsonify({"error": "User not found"}), 404
+
+    target.is_banned = False
+    target.ban_reason = None
+    target.banned_at = None
+    db.session.add(target)
+
+    action = AdminAction(
+        admin_id=user.id,
+        action="unban_user",
+        target_user_id=target.id,
+        note="Unbanned by admin"
+    )
+    db.session.add(action)
+    db.session.commit()
+
+    return jsonify({"message": "User unbanned", "user_id": target.id})
+
+
+
 # Health check endpoint
 @app.route('/api/health', methods=['GET'])
 def health_check():
     return jsonify({'status': 'healthy', 'message': 'Dating app backend is running!'})
+
 
 def migrate_database():
     """Add new columns if they don't exist (works with both SQLite and PostgreSQL)"""
@@ -2157,10 +2600,38 @@ def migrate_database():
                 else:
                     print(f"✅ {col_name} column already exists")
             
-            # Migrate columns
+            # Migrate basic columns (safe for both Postgres and SQLite)
             add_column_if_not_exists('latitude', 'REAL')
             add_column_if_not_exists('longitude', 'REAL')
             add_column_if_not_exists('photos', 'TEXT')
+
+            # Postgres-only migrations for admin/ban/audit fields and tables
+            if is_postgres:
+                add_column_if_not_exists('is_admin', 'BOOLEAN DEFAULT FALSE')
+                add_column_if_not_exists('is_banned', 'BOOLEAN DEFAULT FALSE')
+                add_column_if_not_exists('ban_reason', 'TEXT')
+                add_column_if_not_exists('banned_at', 'TIMESTAMP')
+
+                # Create admin_action table if it doesn't exist (Postgres)
+                try:
+                    db.session.execute(text("""
+                    CREATE TABLE IF NOT EXISTS admin_action (
+                        id SERIAL PRIMARY KEY,
+                        admin_id INTEGER NOT NULL,
+                        action VARCHAR(50),
+                        target_user_id INTEGER,
+                        report_id INTEGER,
+                        note TEXT,
+                        created_at TIMESTAMP DEFAULT now()
+                    );
+                    """))
+                    db.session.commit()
+                    print("✅ admin_action table ensured (Postgres)")
+                except Exception as e:
+                    print(f"⚠️ Could not ensure admin_action table: {e}")
+                    db.session.rollback()
+            else:
+                print("ℹ️ Skipping admin/ban/audit migrations for non-Postgres DB")
                 
     except Exception as e:
         print(f"⚠️ Migration error: {e}")
@@ -2370,6 +2841,7 @@ def upload_media():
 
     file = request.files["file"]
     media_type = request.form.get("type")
+    context = (request.form.get("context") or request.form.get("purpose") or "").strip().lower()
 
     try:
         # 📂 Create temp folder if needed
@@ -2380,17 +2852,29 @@ def upload_media():
         temp_path = os.path.join("temp_uploads", temp_filename)
         file.save(temp_path)
 
-        # 🔍 NSFW Scan (images only)
-        if media_type == "image":
-            is_nsfw, confidence, details = scan_image_nsfw(temp_path)
+        # 🔍 NSFW Scan (images only, OPTIONAL)
+        # NOTE: Backend NSFW scanning is disabled by default to avoid
+        # heavy CPU usage / worker timeouts on small Render instances.
+        # Frontend NSFWJS scanner is still active on the mobile app.
+        enable_backend_nsfw = os.getenv("ENABLE_BACKEND_NSFW", "false").lower() == "true"
+        # Always skip NSFW checks for profile uploads (user asked: no profile NSFW detection)
+        skip_nsfw_for_profile = context == "profile"
 
-            if is_nsfw:
-                os.remove(temp_path)
-                return jsonify({
-                    "error": "NSFW_CONTENT_DETECTED",
-                    "confidence": confidence,
-                    "details": details
-                }), 403
+        if media_type == "image" and enable_backend_nsfw and not skip_nsfw_for_profile:
+            try:
+                # Use high threshold (0.8) - only flag obvious nudity
+                is_nsfw, confidence, details = scan_image_nsfw(temp_path, threshold=0.8)
+
+                if is_nsfw:
+                    os.remove(temp_path)
+                    return jsonify({
+                        "error": "NSFW_CONTENT_DETECTED",
+                        "confidence": confidence,
+                        "details": details
+                    }), 403
+            except Exception as scan_err:
+                # If scanning fails (timeout / OOM / any error), log and continue
+                print(f"NSFW scan error (ignored, upload continues): {scan_err}")
 
         # ☁️ Upload to Cloudinary
         upload_result = cloudinary.uploader.upload(

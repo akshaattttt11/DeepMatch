@@ -13,6 +13,8 @@ import { getVerifiedLocation } from '../utils/locationService';
 
 const { width } = Dimensions.get('window');
 
+const API_BASE_URL = 'https://deepmatch.onrender.com';
+
 const placeholderPhoto = 'https://ui-avatars.com/api/?name=User&background=10b981&color=fff&size=256';
 
 const initialProfile = {
@@ -336,32 +338,69 @@ export default function ProfileScreen() {
             mediaTypes: ImagePicker.MediaTypeOptions.Images,
             allowsEditing: true,
             aspect: [4, 5],
-            quality: 1,
+            quality: 0.7, // smaller upload, faster
           });
           
           if (!result.canceled && result.assets[0]) {
             const uri = result.assets[0].uri;
+            
+            // 🔐 Get auth token
+            const token = await AsyncStorage.getItem('auth_token');
+            if (!token) {
+              Alert.alert('Error', 'Please login again');
+              return;
+            }
+
+            // 📦 Upload to Cloudinary
+            const formData = new FormData();
+            formData.append("file", {
+              uri,
+              name: `photo_${imageIndex}.jpg`,
+              type: "image/jpeg",
+            });
+            formData.append("type", "image");
+            formData.append("context", "profile"); // backend must skip NSFW for profile
+
+            const response = await fetch(
+              `${API_BASE_URL}/api/messages/upload`,
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  "Content-Type": "multipart/form-data",
+                },
+                body: formData,
+              }
+            );
+
+            const data = await safeReadJson(response);
+            if (!response.ok) {
+              throw new Error(data?.error || data?.details || "Upload failed");
+            }
+
+            // ✅ Use Cloudinary URL
+            const cloudinaryUrl = data.url;
             const updatedPhotos = [...photos];
             const currentActualIndex = photos.findIndex((p, i) => {
               const countBefore = photos.slice(0, i).filter(Boolean).length;
               return p && countBefore === imageIndex;
             });
             if (currentActualIndex >= 0) {
-              updatedPhotos[currentActualIndex] = uri;
+              updatedPhotos[currentActualIndex] = cloudinaryUrl;
               setPhotos(updatedPhotos);
               
               // Update main photo if it's the first slot
               if (currentActualIndex === 0) {
-                setProfile(prev => ({ ...prev, profile_picture: uri }));
-                setEditProfile(prev => ({ ...prev, profile_picture: uri }));
+                setProfile(prev => ({ ...prev, profile_picture: cloudinaryUrl }));
+                setEditProfile(prev => ({ ...prev, profile_picture: cloudinaryUrl }));
               }
               
-              Alert.alert('Success', 'Photo updated successfully!');
+              Alert.alert('Success', 'Photo uploaded to Cloudinary!');
             }
           }
         } catch (error) {
           console.error('Failed to update photo:', error);
-          Alert.alert('Error', 'Failed to update photo. Please try again.');
+          Alert.alert('Error', `Failed to upload photo: ${error.message}`);
         }
       };
 
@@ -426,36 +465,139 @@ export default function ProfileScreen() {
     setZoomModal(false);
   }, [photos, currentImageIndex]);
 
+  const safeReadJson = async (res) => {
+    const text = await res.text();
+    try {
+      return text ? JSON.parse(text) : {};
+    } catch (e) {
+      // Non-JSON response (HTML, empty, proxy error, etc.)
+      return { error: "NON_JSON_RESPONSE", raw: text?.slice(0, 400) };
+    }
+  };
+
   const handleAddPhoto = async (slotIndex = 0) => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [4, 5],
-        quality: 1,
+        quality: 0.7, // smaller upload, faster
       });
       if (!result.canceled) {
         const uri = result.assets[0].uri;
+        
+        // 🔐 Get auth token
+        const token = await AsyncStorage.getItem('auth_token');
+        if (!token) {
+          Alert.alert('Error', 'Please login again');
+          return;
+        }
+
+        // 📦 Prepare form data for Cloudinary upload
+        const formData = new FormData();
+        formData.append("file", {
+          uri,
+          name: `photo_${slotIndex}.jpg`,
+          type: "image/jpeg",
+        });
+        formData.append("type", "image");
+        formData.append("context", "profile"); // backend must skip NSFW for profile
+
+        // 🚀 Upload to Cloudinary via backend
+        const response = await fetch(
+          `${API_BASE_URL}/api/messages/upload`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "multipart/form-data",
+            },
+            body: formData,
+          }
+        );
+
+        const data = await safeReadJson(response);
+
+        if (!response.ok) {
+          throw new Error(data?.error || data?.details || "Upload failed");
+        }
+
+        // ✅ Save Cloudinary URL (NOT local URI)
+        const cloudinaryUrl = data.url;
         setPhotos(prev => {
           const copy = [...prev];
           while (copy.length < 6) copy.push(null);
-          copy[slotIndex] = uri;
+          copy[slotIndex] = cloudinaryUrl;
           return copy;
         });
         if (slotIndex === 0) {
-          setProfile(prev => ({ ...prev, profile_picture: uri }));
-          setEditProfile(prev => ({ ...prev, profile_picture: uri }));
+          setProfile(prev => ({ ...prev, profile_picture: cloudinaryUrl }));
+          setEditProfile(prev => ({ ...prev, profile_picture: cloudinaryUrl }));
         }
+        
+        Alert.alert('Success', 'Photo uploaded to Cloudinary!');
       }
     } catch (error) {
       console.error('Failed to add photo:', error);
-      Alert.alert('Error', 'Failed to add photo. Please try again.');
+      Alert.alert('Error', `Failed to upload photo: ${error.message}`);
     }
   };
 
   const handleSavePhotos = async () => {
     try {
-      const cleanedPhotos = photos.filter(Boolean);
+      // Upload any remaining local URIs to Cloudinary before saving
+      const token = await AsyncStorage.getItem('auth_token');
+      const uploadedPhotos = [];
+      
+      for (let i = 0; i < photos.length; i++) {
+        const photo = photos[i];
+        if (!photo) {
+          uploadedPhotos.push(null);
+          continue;
+        }
+        
+        // Check if it's already a Cloudinary URL
+        if (photo.startsWith('http://') || photo.startsWith('https://')) {
+          uploadedPhotos.push(photo);
+        } else {
+          // It's a local URI - upload to Cloudinary
+          try {
+            const formData = new FormData();
+            formData.append("file", {
+              uri: photo,
+              name: `photo_${i}.jpg`,
+              type: "image/jpeg",
+            });
+            formData.append("type", "image");
+            formData.append("context", "profile"); // backend must skip NSFW for profile
+
+            const response = await fetch(
+              `${API_BASE_URL}/api/messages/upload`,
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  "Content-Type": "multipart/form-data",
+                },
+                body: formData,
+              }
+            );
+
+            const data = await safeReadJson(response);
+            if (response.ok && data.url) {
+              uploadedPhotos.push(data.url);
+            } else {
+              console.warn(`Failed to upload photo ${i}, skipping`);
+              uploadedPhotos.push(null);
+            }
+          } catch (uploadError) {
+            console.error(`Error uploading photo ${i}:`, uploadError);
+            uploadedPhotos.push(null);
+          }
+        }
+      }
+      
+      const cleanedPhotos = uploadedPhotos.filter(Boolean);
       const main = cleanedPhotos[0] || profile.profile_picture || '';
       const updatedProfile = {
         ...profile,
@@ -466,7 +608,7 @@ export default function ProfileScreen() {
       setEditProfile(prev => ({ ...prev, profile_picture: main, photos: cleanedPhotos }));
       await simpleService.updateProfile(formatProfileForBackend(updatedProfile));
       setPhotoModal(false);
-      Alert.alert('Saved', 'Photos saved successfully.');
+      Alert.alert('Saved', 'Photos uploaded and saved successfully!');
     } catch (error) {
       console.error('Failed to save photos:', error);
       Alert.alert('Error', 'Could not save photos. Please try again.');
@@ -531,7 +673,7 @@ export default function ProfileScreen() {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.8,
+      quality: 0.7, // smaller upload, faster
     });
 
     if (!result.canceled) {
@@ -548,6 +690,7 @@ export default function ProfileScreen() {
         type: "image/jpeg",
       });
       formData.append("type", "image");
+      formData.append("context", "profile"); // backend must skip NSFW for profile
 
       // 🚀 Upload to Flask → Cloudinary
       const response = await fetch(
@@ -562,10 +705,10 @@ export default function ProfileScreen() {
         }
       );
 
-      const data = await response.json();
+      const data = await safeReadJson(response);
 
       if (!response.ok) {
-        throw new Error(data.error || "Upload failed");
+        throw new Error(data?.error || data?.details || "Upload failed");
       }
 
       // ✅ Save Cloudinary URL (NOT local URI)
@@ -877,6 +1020,25 @@ export default function ProfileScreen() {
           <Text style={styles.quizButtonText}>Take Quiz</Text>
         </TouchableOpacity>
       </Animated.View>
+
+      {/* 🧩 BLOCKED USERS BUTTON */}
+      <Animated.View style={[styles.blockedUsersButtonContainer, { opacity: editAnim, transform: [{ scale: editAnim }] }]}>
+        <TouchableOpacity
+          onPress={() => navigation.navigate("BlockedUsers")}
+          style={styles.blockedUsersButton}
+          activeOpacity={0.8}
+        >
+          <Ionicons
+            name="ban-outline"
+            size={20}
+            color="#f59e0b"
+          />
+          <Text style={styles.blockedUsersButtonText}>
+            Blocked Users
+          </Text>
+        </TouchableOpacity>
+      </Animated.View>
+
       <Animated.View style={{ position: 'absolute', bottom: 120, left: 0, right: 0, alignItems: 'center', opacity: logoutAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0.5] }) }}>
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout} activeOpacity={0.8}>
           <Ionicons name="log-out-outline" size={20} color="#ef4444" />
@@ -1198,11 +1360,38 @@ const styles = StyleSheet.create({
   },
   quizButtonContainer: {
     position: 'absolute',
-    bottom: 180,
+    bottom: 250,
     left: 0,
     right: 0,
     alignItems: 'center',
     zIndex: 10,
+  },
+  blockedUsersButtonContainer: {
+    position: 'absolute',
+    bottom: 190,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  blockedUsersButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#27272a',
+    paddingHorizontal: 22,
+    paddingVertical: 12,
+    borderRadius: 24,
+    shadowColor: '#f59e0b',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  blockedUsersButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 16,
+    marginLeft: 8,
   },
   quizButton: {
     flexDirection: 'row',

@@ -22,8 +22,7 @@ def send_verification_email_resend(to_email, username, token):
            text-decoration:none;border-radius:6px;">
            Verify Email
         </a>
-        <p>If you didn’t sign up, ignore this email.</p>
+        <p>If you didn't sign up, ignore this email.</p>
         """
     })
     return True
-
