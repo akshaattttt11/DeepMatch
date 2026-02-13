@@ -1113,10 +1113,42 @@ const handleBlockUser = async (user) => {
   {/* 3 DOT MENU */}
   <Menu
     visible={menuVisible === item.id}
-    onDismiss={() => setMenuVisible(null)}
+    onDismiss={() => {
+      try {
+        setMenuVisible(null);
+      } catch (e) {
+        console.error("Menu dismiss error:", e);
+      }
+    }}
     anchor={
       <TouchableOpacity
-        onPress={() => setMenuVisible(item.id)}
+        onPress={() => {
+          try {
+            setMenuVisible(item.id);
+          } catch (e) {
+            console.error("Menu open error:", e);
+            // Fallback: show action sheet if Menu fails
+            Alert.alert(
+              "Options",
+              `Actions for ${item.name}`,
+              [
+                {
+                  text: "Report User",
+                  onPress: () => {
+                    setReportTargetUser(item);
+                    setReportModalVisible(true);
+                  },
+                },
+                {
+                  text: "Block User",
+                  style: "destructive",
+                  onPress: () => handleBlockUser(item),
+                },
+                { text: "Cancel", style: "cancel" },
+              ]
+            );
+          }
+        }}
         style={{ padding: 6 }}
       >
         <Ionicons
@@ -1129,15 +1161,28 @@ const handleBlockUser = async (user) => {
   >
     <Menu.Item
       onPress={() => {
-  setMenuVisible(null);
-  setReportTargetUser(item);
-  setReportModalVisible(true);
-}}
+        try {
+          setMenuVisible(null);
+          setReportTargetUser(item);
+          setReportModalVisible(true);
+        } catch (e) {
+          console.error("Report menu error:", e);
+          Alert.alert("Error", "Failed to open report menu");
+        }
+      }}
       title="Report User"
     />
     <Divider />
     <Menu.Item
-      onPress={() => handleBlockUser(item)}
+      onPress={() => {
+        try {
+          setMenuVisible(null);
+          handleBlockUser(item);
+        } catch (e) {
+          console.error("Block menu error:", e);
+          Alert.alert("Error", "Failed to block user");
+        }
+      }}
       title="Block User"
     />
   </Menu>
@@ -1825,8 +1870,8 @@ const uploadMedia = async (uri, type, base64Override = null) => {
     setScanningImage(true);
 
     // 1) Frontend NSFW scan (WebView + NSFWJS) BEFORE uploading
-    // Use 0.5 threshold (more strict, as you requested)
-    const threshold = 0.5;
+    // Use 0.8 threshold (very conservative - only detect obvious nudity, not objects/backpacks)
+    const threshold = 0.8;
     let base64 = base64Override;
     if (!base64) {
       base64 = await FileSystem.readAsStringAsync(uri, {
@@ -2004,10 +2049,42 @@ const canEdit =
   {/* 3 DOT MENU */}
   <Menu
     visible={menuVisible === "chat"}
-    onDismiss={() => setMenuVisible(null)}
+    onDismiss={() => {
+      try {
+        setMenuVisible(null);
+      } catch (e) {
+        console.error("Chat menu dismiss error:", e);
+      }
+    }}
     anchor={
       <TouchableOpacity
-        onPress={() => setMenuVisible("chat")}
+        onPress={() => {
+          try {
+            setMenuVisible("chat");
+          } catch (e) {
+            console.error("Chat menu open error:", e);
+            // Fallback: show action sheet if Menu fails
+            Alert.alert(
+              "Options",
+              `Actions for ${selectedMatch.name}`,
+              [
+                {
+                  text: "Report User",
+                  onPress: () => {
+                    setReportTargetUser(selectedMatch);
+                    setReportModalVisible(true);
+                  },
+                },
+                {
+                  text: "Block User",
+                  style: "destructive",
+                  onPress: () => handleBlockUser(selectedMatch),
+                },
+                { text: "Cancel", style: "cancel" },
+              ]
+            );
+          }
+        }}
         style={{ padding: 6 }}
       >
         <Ionicons
@@ -2021,9 +2098,14 @@ const canEdit =
     <Menu.Item
       title="Report User"
       onPress={() => {
-        setMenuVisible(null);
-        setReportTargetUser(selectedMatch);
-        setReportModalVisible(true);
+        try {
+          setMenuVisible(null);
+          setReportTargetUser(selectedMatch);
+          setReportModalVisible(true);
+        } catch (e) {
+          console.error("Report menu error:", e);
+          Alert.alert("Error", "Failed to open report menu");
+        }
       }}
     />
 
@@ -2032,8 +2114,13 @@ const canEdit =
     <Menu.Item
       title="Block User"
       onPress={() => {
-        setMenuVisible(null);
-        handleBlockUser(selectedMatch);
+        try {
+          setMenuVisible(null);
+          handleBlockUser(selectedMatch);
+        } catch (e) {
+          console.error("Block menu error:", e);
+          Alert.alert("Error", "Failed to block user");
+        }
       }}
     />
   </Menu>

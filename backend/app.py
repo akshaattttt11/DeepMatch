@@ -2304,6 +2304,32 @@ def block_user():
     return jsonify({"message": "User blocked successfully"})
 
 # =============================
+# 📋 GET BLOCKED USERS LIST
+# =============================
+@app.route("/api/blocked-users", methods=["GET"])
+def get_blocked_users():
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    blocker_id = verify_token(token)
+
+    if not blocker_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    blocks = UserBlock.query.filter_by(blocker_id=blocker_id).all()
+    
+    user_list = []
+    for block in blocks:
+        blocked_user = db.session.get(User, block.blocked_user_id)
+        if blocked_user:
+            user_list.append({
+                "id": blocked_user.id,
+                "name": f"{blocked_user.first_name} {blocked_user.last_name}".strip() or blocked_user.username,
+                "profile_picture": blocked_user.profile_picture or "https://ui-avatars.com/api/?name=User&background=10b981&color=fff",
+            })
+    
+    return jsonify({"users": user_list})
+
+
+# =============================
 # 🔓 UNBLOCK USER
 # =============================
 @app.route("/api/unblock-user", methods=["POST"])
@@ -2815,6 +2841,7 @@ def upload_media():
 
     file = request.files["file"]
     media_type = request.form.get("type")
+    context = (request.form.get("context") or request.form.get("purpose") or "").strip().lower()
 
     try:
         # 📂 Create temp folder if needed
@@ -2825,17 +2852,29 @@ def upload_media():
         temp_path = os.path.join("temp_uploads", temp_filename)
         file.save(temp_path)
 
-        # 🔍 NSFW Scan (images only)
-        if media_type == "image":
-            is_nsfw, confidence, details = scan_image_nsfw(temp_path)
+        # 🔍 NSFW Scan (images only, OPTIONAL)
+        # NOTE: Backend NSFW scanning is disabled by default to avoid
+        # heavy CPU usage / worker timeouts on small Render instances.
+        # Frontend NSFWJS scanner is still active on the mobile app.
+        enable_backend_nsfw = os.getenv("ENABLE_BACKEND_NSFW", "false").lower() == "true"
+        # Always skip NSFW checks for profile uploads (user asked: no profile NSFW detection)
+        skip_nsfw_for_profile = context == "profile"
 
-            if is_nsfw:
-                os.remove(temp_path)
-                return jsonify({
-                    "error": "NSFW_CONTENT_DETECTED",
-                    "confidence": confidence,
-                    "details": details
-                }), 403
+        if media_type == "image" and enable_backend_nsfw and not skip_nsfw_for_profile:
+            try:
+                # Use high threshold (0.8) - only flag obvious nudity
+                is_nsfw, confidence, details = scan_image_nsfw(temp_path, threshold=0.8)
+
+                if is_nsfw:
+                    os.remove(temp_path)
+                    return jsonify({
+                        "error": "NSFW_CONTENT_DETECTED",
+                        "confidence": confidence,
+                        "details": details
+                    }), 403
+            except Exception as scan_err:
+                # If scanning fails (timeout / OOM / any error), log and continue
+                print(f"NSFW scan error (ignored, upload continues): {scan_err}")
 
         # ☁️ Upload to Cloudinary
         upload_result = cloudinary.uploader.upload(

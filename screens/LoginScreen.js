@@ -5,6 +5,8 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import simpleService from '../services/simpleService';
 
+const ADMIN_EMAIL = 'deepmatch.noreply@gmail.com';
+
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -52,12 +54,22 @@ export default function LoginScreen({ navigation }) {
         
         setMessage('Login successful!');
         setMessageType('success');
+
+        // Decide where to go based on admin email
+        const user = data.user || {};
+        const userEmail = (user.email || '').toLowerCase();
+        const isAdmin = userEmail === ADMIN_EMAIL.toLowerCase() || user.is_admin;
         
         setTimeout(() => {
-          // Navigate to the tab navigator and show Profile tab
-          navigation.replace('MainTabs', {
-            screen: 'Profile',
-          });
+          if (isAdmin) {
+            // Admin: only see admin dashboard
+            navigation.replace('AdminReports');
+          } else {
+            // Normal user: go to main app tabs
+            navigation.replace('MainTabs', {
+              screen: 'Profile',
+            });
+          }
         }, 800);
       } else {
         // Check if email is not verified

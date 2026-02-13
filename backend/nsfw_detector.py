@@ -67,17 +67,22 @@ class NSFWDetector:
             aspect_ratio = height / width if width else 1.0
 
             # Build a pseudo "confidence" score 0–1
+            # MUCH MORE CONSERVATIVE - only flag if VERY high skin ratio (likely actual nudity)
+            # Backpacks, furniture, etc. won't trigger this
             score = 0.0
-            if skin_ratio > 0.35:
-                score += 0.4
-            if skin_ratio > 0.55:
+            
+            # Only flag if skin ratio is EXTREMELY high (likely actual nudity, not objects)
+            if skin_ratio > 0.70:  # Increased from 0.55 - only very high skin ratio
+                score += 0.5
+            elif skin_ratio > 0.60:  # Still high but less certain
                 score += 0.3
-            if aspect_ratio > 1.1:  # taller than wide
-                score += 0.2
-            if width * height > 800 * 800:
-                score += 0.1
-
-            is_nsfw = score >= threshold
+            # Removed lower thresholds - backpacks/furniture won't trigger
+            
+            # Aspect ratio check removed - too many false positives
+            # Size check removed - not relevant for nudity detection
+            
+            # Only flag if score is VERY high (0.8+) - conservative approach
+            is_nsfw = score >= 0.8  # Much higher threshold - only flag obvious nudity
 
             return is_nsfw, score, {
                 "method": "heuristic_rgb_skin",
