@@ -1174,37 +1174,19 @@ def get_matches():
         if is_blocked or not other_user:
             continue
 
-        # Check if there's an unread like/rose notification for this user
-        pending_notification = Notification.query.filter_by(
-            user_id=user_id,
-            from_user_id=other_user_id,
-            type='like',
-            is_read=False
-        ).first()
-        
-        if not pending_notification:
-            # Also check for rose notifications
-            pending_notification = Notification.query.filter_by(
-                user_id=user_id,
-                from_user_id=other_user_id,
-                type='rose',
-                is_read=False
-            ).first()
-        
-        # Only include match if no pending notification
-        if not pending_notification:
-            seen_other_users.add(other_user_id)
-            match_list.append({
-                'match_id': match.id,
-                'user': {
-                    'id': other_user.id,
-                    'username': other_user.username,
-                    'first_name': other_user.first_name,
-                    'last_name': other_user.last_name,
-                    'profile_picture': other_user.profile_picture
-                },
-                'matched_at': match.matched_at.isoformat()
-            })
+        # Once a Match exists and is active, ALWAYS show it for both users.
+        seen_other_users.add(other_user_id)
+        match_list.append({
+            'match_id': match.id,
+            'user': {
+                'id': other_user.id,
+                'username': other_user.username,
+                'first_name': other_user.first_name,
+                'last_name': other_user.last_name,
+                'profile_picture': other_user.profile_picture
+            },
+            'matched_at': match.matched_at.isoformat()
+        })
     
     return jsonify({'matches': match_list})
 
