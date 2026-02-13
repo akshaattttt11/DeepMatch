@@ -571,20 +571,25 @@ useEffect(() => {
     }
 
     const data = await response.json();
-
+    
     const newMsg = {
-  id: data.message_id,
-  text: mediaPayload ? null : messageText,
-  media_url: mediaPayload?.media_url || null,
-  type: mediaPayload?.type || 'text',
-  sender: 'me',
-  timestamp: data.sent_at,
-  timeLabel: formatISTTime(data.sent_at),
-  isDelivered: false,
-  isRead: false,
-  reply_to: replyTo || null,
-};
+      id: data.message_id,
+      text: mediaPayload ? null : messageText,
+      media_url: mediaPayload?.media_url || null,
+      type: mediaPayload?.type || 'text',
+      sender: 'me',
+      timestamp: data.sent_at,
+      timeLabel: formatISTTime(data.sent_at),
+      isDelivered: false,
+      isRead: false,
+      reply_to: replyTo || null,
+    };
 
+    // Optimistically add to UI so user sees the message immediately
+    setMessages(prev => ({
+      ...prev,
+      [matchId]: [...(prev[matchId] || []), newMsg],
+    }));
 
     textInputRef.current?.focus();
 
@@ -1334,23 +1339,21 @@ const handleBlockUser = async (user) => {
   return (
     <SafeAreaView style={{ flex: 1 }}>
       <ChatInterface
-       selectedMatch={selectedMatch}
-       messages={messages}
-       setMessages={setMessages}
-       newMessage={newMessage}
-       setNewMessage={setNewMessage}
-       handleSendMessage={handleSendMessage}
-       closeChat={closeChat}
-       loadMessages={loadMessages}
-       isOtherTyping={isOtherTyping}
-       currentUser={currentUser}
-       navigation={navigation}
-       menuVisible={menuVisible}
-       setMenuVisible={setMenuVisible}
-       setReportTargetUser={setReportTargetUser}
-       setReportModalVisible={setReportModalVisible}
-       handleBlockUser={handleBlockUser}
-     />
+        selectedMatch={selectedMatch}
+        messages={messages}
+        setMessages={setMessages}
+        newMessage={newMessage}
+        setNewMessage={setNewMessage}
+        handleSendMessage={handleSendMessage}
+        closeChat={closeChat}
+        loadMessages={loadMessages}
+        isOtherTyping={isOtherTyping}
+        currentUser={currentUser}
+        navigation={navigation}
+        setReportTargetUser={setReportTargetUser}
+        setReportModalVisible={setReportModalVisible}
+        handleBlockUser={handleBlockUser}
+      />
     </SafeAreaView>
   );
 }
@@ -1583,8 +1586,6 @@ const ChatInterface = ({
   isOtherTyping,
   currentUser,
   navigation,
-  menuVisible,
-  setMenuVisible,
   setReportTargetUser,
   setReportModalVisible,
   handleBlockUser
@@ -1698,13 +1699,30 @@ const deleteMessage = async (messageId, deleteForEveryone) => {
       throw new Error('Delete failed');
     }
 
-    if (!deleteForEveryone) {
-      const matchId = selectedMatch.matchId || selectedMatch.id;
-      setMessages(prev => ({
+    const matchId = selectedMatch?.matchId || selectedMatch?.id;
+    if (!matchId) return;
+
+    setMessages(prev => {
+      const list = prev[matchId] || [];
+
+      if (!deleteForEveryone) {
+        // Delete for me: remove message from my view
+        return {
+          ...prev,
+          [matchId]: list.filter(m => m.id !== messageId),
+        };
+      }
+
+      // Delete for everyone: mark as deleted in UI
+      return {
         ...prev,
-        [matchId]: (prev[matchId] || []).filter(m => m.id !== messageId)
-      }));
-    }
+        [matchId]: list.map(m =>
+          m.id === messageId
+            ? { ...m, isDeleted: true, is_deleted_for_everyone: true, text: "" }
+            : m
+        ),
+      };
+    });
 
   } catch (e) {
     Alert.alert('Error', 'Failed to delete message');
@@ -1796,6 +1814,19 @@ const editMessage = async (message) => {
       throw new Error('Edit failed');
     }
 
+    // Optimistically update edited text in UI
+    const matchId = selectedMatch?.matchId || selectedMatch?.id;
+    if (matchId && message?.id != null) {
+      setMessages(prev => ({
+        ...prev,
+        [matchId]: (prev[matchId] || []).map(m =>
+          m.id === message.id
+            ? { ...m, text: message.text, editedAt: new Date().toISOString() }
+            : m
+        ),
+      }));
+    }
+
   } catch (e) {
     console.error(e);
     Alert.alert('Error', 'Failed to edit message');
@@ -1809,7 +1840,7 @@ if (!messageId || !emoji) return;
 
   try {
     const token = await AsyncStorage.getItem("auth_token");
-    await fetch(`${API_BASE_URL}/api/messages/${messageId}/react`, {
+    const res = await fetch(`${API_BASE_URL}/api/messages/${messageId}/react`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -1817,7 +1848,44 @@ if (!messageId || !emoji) return;
       },
       body: JSON.stringify({ emoji }),
     });
-    // ❗ UI updates ONLY via socket "message_reaction"
+    if (!res.ok) {
+      throw new Error("React failed");
+    }
+
+    // Optimistically update reactions in UI
+    const matchId = selectedMatch?.matchId || selectedMatch?.id;
+    if (matchId && currentUser?.id) {
+      setMessages(prev => ({
+        ...prev,
+        [matchId]: (prev[matchId] || []).map(m => {
+          if (m.id !== messageId) return m;
+
+          const prevReactions = m.reactions || {};
+          const userId = currentUser.id;
+
+          // Remove this user from all emoji arrays
+          const cleanedEntries = Object.entries(prevReactions)
+            .map(([em, users]) => [
+              em,
+              Array.isArray(users) ? users.filter(id => id !== userId) : [],
+            ])
+            .filter(([_, users]) => users.length > 0);
+
+          const cleaned = {};
+          for (const [em, users] of cleanedEntries) {
+            cleaned[em] = users;
+          }
+
+          // Add this user to the selected emoji
+          cleaned[emoji] = [...(cleaned[emoji] || []), userId];
+
+          return {
+            ...m,
+            reactions: cleaned,
+          };
+        }),
+      }));
+    }
   } catch (e) {
     console.error("Reaction failed", e);
   }
