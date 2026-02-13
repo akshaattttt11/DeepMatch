@@ -4,7 +4,7 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
- 
+import { Provider as PaperProvider } from 'react-native-paper';
 
 import HomeScreen from './screens/HomeScreen';
 import ProfileScreen from './screens/ProfileScreen';
@@ -49,18 +49,24 @@ export default function App() {
 
   if (quizDone === null) return null; // or a splash/loading screen
 
-    return (
-    <NavigationContainer>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="Login" component={LoginScreen} />
-        <Stack.Screen name="Signup" component={SignupScreen} />
-        <Stack.Screen name="Quiz" component={QuizScreen} />
-        <Stack.Screen name="ZodiacQuiz" component={ZodiacQuizScreen} />
-        <Stack.Screen name="MainTabs" component={MainTabs} options={{ gestureEnabled: false }} />
-        <Stack.Screen name="ProfileDetail" component={ProfileDetailScreen} />
-        <Stack.Screen name="BlockedUsers" component={BlockedUsersScreen}/>
-        <Stack.Screen name="AdminReports" component={AdminReportsScreen} />
-      </Stack.Navigator>
-    </NavigationContainer>
-    );
+  return (
+    <PaperProvider>
+      <NavigationContainer>
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="Login" component={LoginScreen} />
+          <Stack.Screen name="Signup" component={SignupScreen} />
+          <Stack.Screen name="Quiz" component={QuizScreen} />
+          <Stack.Screen name="ZodiacQuiz" component={ZodiacQuizScreen} />
+          <Stack.Screen
+            name="MainTabs"
+            component={MainTabs}
+            options={{ gestureEnabled: false }}
+          />
+          <Stack.Screen name="ProfileDetail" component={ProfileDetailScreen} />
+          <Stack.Screen name="BlockedUsers" component={BlockedUsersScreen} />
+          <Stack.Screen name="AdminReports" component={AdminReportsScreen} />
+        </Stack.Navigator>
+      </NavigationContainer>
+    </PaperProvider>
+  );
 }

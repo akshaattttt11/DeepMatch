@@ -199,6 +199,20 @@ export default function AdminReportsScreen({ navigation }) {
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      await AsyncStorage.removeItem("auth_token");
+      await AsyncStorage.removeItem("current_user");
+      navigation.reset({
+        index: 0,
+        routes: [{ name: "Login" }],
+      });
+    } catch (e) {
+      console.error("Admin logout error", e);
+      Alert.alert("Error", "Failed to logout. Please try again.");
+    }
+  };
+
   const renderItem = ({ item }) => (
     <TouchableOpacity
       style={styles.card}
@@ -268,13 +282,28 @@ export default function AdminReportsScreen({ navigation }) {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.back}>
+        <TouchableOpacity
+          onPress={() => {
+            if (navigation.canGoBack && navigation.canGoBack()) {
+              navigation.goBack();
+            } else {
+              // As admin entry-point, back acts as logout
+              handleLogout();
+            }
+          }}
+          style={styles.back}
+        >
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.title}>Admin — Reports</Text>
-        <TouchableOpacity onPress={loadReports} style={styles.refresh}>
-          <Ionicons name="refresh" size={20} color="#10b981" />
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          <TouchableOpacity onPress={loadReports} style={styles.iconButton}>
+            <Ionicons name="refresh" size={20} color="#10b981" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleLogout} style={styles.iconButton}>
+            <Ionicons name="log-out-outline" size={20} color="#ef4444" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={styles.searchRow}>
@@ -398,8 +427,19 @@ const styles = StyleSheet.create({
     borderBottomColor: "#27272a",
   },
   back: { padding: 8 },
-  title: { color: "#fff", fontSize: 18, fontWeight: "700", flex: 1, textAlign: "center" },
-  refresh: { padding: 8 },
+  title: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "700",
+    flex: 1,
+    textAlign: "center",
+  },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  iconButton: { padding: 8 },
   searchRow: { padding: 12 },
   search: {
     backgroundColor: "#1f1f1f",

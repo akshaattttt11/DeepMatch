@@ -535,7 +535,7 @@ export default function ProfileScreen() {
           setEditProfile(prev => ({ ...prev, profile_picture: cloudinaryUrl }));
         }
         
-        Alert.alert('Success', 'Photo uploaded to Cloudinary!');
+        Alert.alert('Success', 'Photo uploaded successfully!');
       }
     } catch (error) {
       console.error('Failed to add photo:', error);
