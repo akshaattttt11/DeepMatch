@@ -1149,55 +1149,62 @@ def get_matches():
     matches = Match.query.filter(
         (Match.user1_id == user_id) | (Match.user2_id == user_id),
         Match.is_active == True
-    ).all()
+    ).order_by(Match.matched_at.desc()).all()
     
+    # Deduplicate by "other user", keep the most recent match per user
+    seen_other_users = set()
     match_list = []
 
     for match in matches:
         # Get the other user in the match
         other_user_id = match.user2_id if match.user1_id == user_id else match.user1_id
+
+        # Skip if we've already added a match card for this user
+        if other_user_id in seen_other_users:
+            continue
+
         other_user = db.session.get(User, other_user_id)
 
-        # 🚫 BLOCK FILTER (FIXED — INSIDE LOOP)
+        # 🚫 BLOCK FILTER (INSIDE LOOP)
         is_blocked = UserBlock.query.filter(
             ((UserBlock.blocker_id == user_id) & (UserBlock.blocked_user_id == other_user_id)) |
             ((UserBlock.blocker_id == other_user_id) & (UserBlock.blocked_user_id == user_id))
         ).first()
 
-        if is_blocked:
+        if is_blocked or not other_user:
             continue
 
-        if other_user:
-            # Check if there's an unread like/rose notification for this user
+        # Check if there's an unread like/rose notification for this user
+        pending_notification = Notification.query.filter_by(
+            user_id=user_id,
+            from_user_id=other_user_id,
+            type='like',
+            is_read=False
+        ).first()
+        
+        if not pending_notification:
+            # Also check for rose notifications
             pending_notification = Notification.query.filter_by(
                 user_id=user_id,
                 from_user_id=other_user_id,
-                type='like',
+                type='rose',
                 is_read=False
             ).first()
-            
-            if not pending_notification:
-                # Also check for rose notifications
-                pending_notification = Notification.query.filter_by(
-                    user_id=user_id,
-                    from_user_id=other_user_id,
-                    type='rose',
-                    is_read=False
-                ).first()
-            
-            # Only include match if no pending notification
-            if not pending_notification:
-                match_list.append({
-                    'match_id': match.id,
-                    'user': {
-                        'id': other_user.id,
-                        'username': other_user.username,
-                        'first_name': other_user.first_name,
-                        'last_name': other_user.last_name,
-                        'profile_picture': other_user.profile_picture
-                    },
-                    'matched_at': match.matched_at.isoformat()
-                })
+        
+        # Only include match if no pending notification
+        if not pending_notification:
+            seen_other_users.add(other_user_id)
+            match_list.append({
+                'match_id': match.id,
+                'user': {
+                    'id': other_user.id,
+                    'username': other_user.username,
+                    'first_name': other_user.first_name,
+                    'last_name': other_user.last_name,
+                    'profile_picture': other_user.profile_picture
+                },
+                'matched_at': match.matched_at.isoformat()
+            })
     
     return jsonify({'matches': match_list})
 
