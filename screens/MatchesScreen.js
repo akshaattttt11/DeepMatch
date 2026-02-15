@@ -1509,6 +1509,21 @@ const handleBlockUser = async (user) => {
           )}
         </>
       )}
+
+      {/* Bottom Navigation Bar: Home | Profile | Tips */}
+      <View style={styles.bottomBarContainer}>
+        <View style={styles.bottomBar}>
+          <TouchableOpacity onPress={() => navigation.navigate('Home')}>
+            <Ionicons name="home-outline" size={32} color="#fff" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.navigate('Profile')}>
+            <Ionicons name="person-circle-outline" size={32} color="#fff" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.navigate('Tips')}>
+            <MaterialCommunityIcons name="lightbulb-on-outline" size={32} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      </View>
     </SafeAreaView>
   );
 }
@@ -2516,6 +2531,20 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#18181b',
+  },
+  bottomBarContainer: {
+    backgroundColor: '#18181b',
+    paddingBottom: Platform.OS === 'android' ? 24 : 0,
+  },
+  bottomBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    backgroundColor: '#18181b',
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#27272a',
+    height: 60,
   },
   loadingContainer: {
     flex: 1,

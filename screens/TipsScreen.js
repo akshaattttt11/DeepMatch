@@ -1,5 +1,7 @@
 import React, { useState, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated, Easing, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Easing, ActivityIndicator, Platform } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import Svg, { Rect, Polygon, Path } from 'react-native-svg';
 import LightRays from '../components/backgrounds/LightRays';
 
@@ -222,8 +224,11 @@ export default function TipsScreen() {
     outputRange: [60, 0],
   });
 
+  const navigation = useNavigation();
+
   return (
-    <View style={styles.container}>
+    <View style={{ flex: 1 }}>
+      <View style={styles.container}>
       {/* LightRays Background - Simplified configuration */}
       <LightRays
         raysOrigin="top-center"
@@ -311,6 +316,22 @@ export default function TipsScreen() {
           </TouchableOpacity>
         )}
       </View>
+      </View>
+
+      {/* Bottom Navigation Bar: Home | Matches | Profile */}
+      <View style={styles.bottomBarContainer}>
+        <View style={styles.bottomBar}>
+          <TouchableOpacity onPress={() => navigation.navigate('Home')}>
+            <Ionicons name="home-outline" size={32} color="#fff" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.navigate('Matches')}>
+            <MaterialCommunityIcons name="heart-multiple" size={32} color="#fff" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.navigate('Profile')}>
+            <Ionicons name="person-circle-outline" size={32} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      </View>
     </View>
   );
 }
@@ -321,6 +342,20 @@ const styles = StyleSheet.create({
     backgroundColor: '#000', // Keep black background as fallback
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  bottomBarContainer: {
+    backgroundColor: '#111',
+    paddingBottom: Platform.OS === 'android' ? 24 : 0,
+  },
+  bottomBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    backgroundColor: '#111',
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#222',
+    height: 60,
   },
   glassCard: {
     width: 320,

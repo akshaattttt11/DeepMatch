@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, Modal, TextInput, Animated, Easing, Dimensions, SafeAreaView, Alert, ActivityIndicator, KeyboardAvoidingView, ScrollView, Platform, FlatList } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
-import { Ionicons, MaterialIcons } from '@expo/vector-icons';
+import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -40,10 +40,22 @@ const initialProfile = {
 };
 
 const MBTI_OPTIONS = [
-  'INTJ','INTP','ENTJ','ENTP',
-  'INFJ','INFP','ENFJ','ENFP',
-  'ISTJ','ISFJ','ESTJ','ESFJ',
-  'ISTP','ISFP','ESTP','ESFP',
+  { value: 'INTJ', label: 'INTJ (Introverted, Intuitive, Thinking, Judging)' },
+  { value: 'INTP', label: 'INTP (Introverted, Intuitive, Thinking, Perceiving)' },
+  { value: 'ENTJ', label: 'ENTJ (Extraverted, Intuitive, Thinking, Judging)' },
+  { value: 'ENTP', label: 'ENTP (Extraverted, Intuitive, Thinking, Perceiving)' },
+  { value: 'INFJ', label: 'INFJ (Introverted, Intuitive, Feeling, Judging)' },
+  { value: 'INFP', label: 'INFP (Introverted, Intuitive, Feeling, Perceiving)' },
+  { value: 'ENFJ', label: 'ENFJ (Extraverted, Intuitive, Feeling, Judging)' },
+  { value: 'ENFP', label: 'ENFP (Extraverted, Intuitive, Feeling, Perceiving)' },
+  { value: 'ISTJ', label: 'ISTJ (Introverted, Sensing, Thinking, Judging)' },
+  { value: 'ISFJ', label: 'ISFJ (Introverted, Sensing, Feeling, Judging)' },
+  { value: 'ESTJ', label: 'ESTJ (Extraverted, Sensing, Thinking, Judging)' },
+  { value: 'ESFJ', label: 'ESFJ (Extraverted, Sensing, Feeling, Judging)' },
+  { value: 'ISTP', label: 'ISTP (Introverted, Sensing, Thinking, Perceiving)' },
+  { value: 'ISFP', label: 'ISFP (Introverted, Sensing, Feeling, Perceiving)' },
+  { value: 'ESTP', label: 'ESTP (Extraverted, Sensing, Thinking, Perceiving)' },
+  { value: 'ESFP', label: 'ESFP (Extraverted, Sensing, Feeling, Perceiving)' },
 ];
 
 const ENNEAGRAM_OPTIONS = [
@@ -102,7 +114,8 @@ const inchesToFeetInches = (inches) => {
   return `${feet}'${remainingInches}"`;
 };
 
-const PICKER_ITEM_COLOR = Platform.OS === 'ios' ? '#ffffff' : '#111827';
+// Picker option text: black so readable on white dialog (native picker = white background)
+const PICKER_ITEM_COLOR = '#111111';
 
 const badgeDataKeys = [
   { label: 'MBTI', key: 'mbti', icon: 'planet-outline' },
@@ -842,6 +855,7 @@ export default function ProfileScreen() {
       {isBlurred && (
         <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} />
       )}
+      <View style={styles.mainContent}>
       <View style={styles.header}>
         <Text style={styles.headerText}>My Profile</Text>
       </View>
@@ -1039,7 +1053,7 @@ export default function ProfileScreen() {
         </TouchableOpacity>
       </Animated.View>
 
-      <Animated.View style={{ position: 'absolute', bottom: 120, left: 0, right: 0, alignItems: 'center', opacity: logoutAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0.5] }) }}>
+      <Animated.View style={{ position: 'absolute', bottom: 60, left: 0, right: 0, alignItems: 'center', opacity: logoutAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0.5] }) }}>
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout} activeOpacity={0.8}>
           <Ionicons name="log-out-outline" size={20} color="#ef4444" />
           <Text style={styles.logoutText}>Logout</Text>
@@ -1047,6 +1061,8 @@ export default function ProfileScreen() {
         {/* Debug button removed as requested */}
 
       </Animated.View>
+      </View>
+
       <Modal
         visible={modalVisible}
         animationType="slide"
@@ -1183,8 +1199,8 @@ export default function ProfileScreen() {
                     mode="dropdown"
                   >
                     <Picker.Item label="Select MBTI type" value="" color="#a3a3a3" />
-                    {MBTI_OPTIONS.map((type) => (
-                      <Picker.Item key={type} label={type} value={type} color={PICKER_ITEM_COLOR} />
+                    {MBTI_OPTIONS.map((opt) => (
+                      <Picker.Item key={opt.value} label={opt.label} value={opt.value} color={PICKER_ITEM_COLOR} />
                     ))}
                   </Picker>
                 </View>
@@ -1254,6 +1270,21 @@ export default function ProfileScreen() {
           </KeyboardAvoidingView>
         </View>
       </Modal>
+
+      {/* Bottom Navigation Bar: Home | Matches | Tips */}
+      <View style={styles.bottomBarContainer}>
+        <View style={styles.bottomBar}>
+          <TouchableOpacity onPress={() => navigation.navigate('Home')}>
+            <Ionicons name="home-outline" size={32} color="#fff" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.navigate('Matches')}>
+            <MaterialCommunityIcons name="heart-multiple" size={32} color="#fff" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.navigate('Tips')}>
+            <MaterialCommunityIcons name="lightbulb-on-outline" size={32} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      </View>
     </SafeAreaView>
   );
 }
@@ -1262,6 +1293,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#18181b',
+  },
+  mainContent: {
+    flex: 1,
   },
   loadingContainer: {
     flex: 1,
@@ -1341,7 +1375,7 @@ const styles = StyleSheet.create({
   },
   editButtonContainer: {
     position: 'absolute',
-    bottom: 110,
+    bottom: 70,
     right: 30,
     zIndex: 10,
     shadowColor: '#10b981',
@@ -1360,7 +1394,7 @@ const styles = StyleSheet.create({
   },
   quizButtonContainer: {
     position: 'absolute',
-    bottom: 250,
+    bottom: 190,
     left: 0,
     right: 0,
     alignItems: 'center',
@@ -1368,7 +1402,7 @@ const styles = StyleSheet.create({
   },
   blockedUsersButtonContainer: {
     position: 'absolute',
-    bottom: 190,
+    bottom: 130,
     left: 0,
     right: 0,
     alignItems: 'center',
@@ -1537,6 +1571,20 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '700',
     fontSize: 16,
+  },
+  bottomBarContainer: {
+    backgroundColor: '#18181b',
+    paddingBottom: Platform.OS === 'android' ? 24 : 0,
+  },
+  bottomBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    backgroundColor: '#18181b',
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#27272a',
+    height: 60,
   },
   editProfilePic: {
     width: 90,
