@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, Image, StyleSheet, TouchableOpacity, SafeAreaView, Platform, Dimensions, Modal, Animated, ScrollView, Alert, TextInput, ActivityIndicator } from 'react-native';
+import { View, Text, Image, StyleSheet, TouchableOpacity, SafeAreaView, Platform, Dimensions, Modal, Animated, ScrollView, Alert, TextInput, ActivityIndicator, KeyboardAvoidingView } from 'react-native';
 import { Ionicons, FontAwesome, MaterialCommunityIcons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { Picker } from '@react-native-picker/picker';
@@ -19,17 +19,31 @@ function inchesToFeetInches(inches) {
   return `${ft}'${inch}"`;
 }
 
-// Helper to convert height string like "5'11"" to total inches
+// Helper to convert height string like "5'11"" or "5'11" or 71 (inches) to total inches
 function heightStringToInches(heightStr) {
-  if (!heightStr || typeof heightStr !== 'string') return null;
-  
-  // Match pattern like "5'11"" or "5'11""
-  const match = heightStr.match(/(\d+)'(\d+)"/);
-  if (!match) return null;
-  
-  const feet = parseInt(match[1], 10);
-  const inches = parseInt(match[2], 10);
-  return feet * 12 + inches;
+  if (heightStr == null || heightStr === '') return null;
+  if (typeof heightStr === 'number' && !isNaN(heightStr)) return Math.round(heightStr);
+  const str = String(heightStr).trim();
+  if (!str) return null;
+  // Already a number (inches)
+  const asNumber = parseInt(str, 10);
+  if (!isNaN(asNumber) && str === String(asNumber)) return asNumber;
+  // Backend-style: strip double quotes and any quote chars, split on single quote
+  const normalized = str.replace(/["\u201c\u201d]/g, '').trim();
+  const parts = normalized.split("'");
+  if (parts.length >= 2) {
+    const feet = parseInt(parts[0].trim(), 10);
+    const inches = parseInt(parts[1].trim(), 10);
+    if (!isNaN(feet) && !isNaN(inches)) return feet * 12 + inches;
+  }
+  // Regex fallback: 5'11" or 5'11
+  const match = str.match(/(\d+)\s*'\s*(\d+)/);
+  if (match) {
+    const feet = parseInt(match[1], 10);
+    const inches = parseInt(match[2], 10);
+    return feet * 12 + inches;
+  }
+  return null;
 }
 
 // Generate height options
@@ -242,11 +256,12 @@ export default function HomeScreen({ navigation }) {
 
     const shouldApplyHeightFilter = heightFilter.enabled;
     const heightMatches =
-      !shouldApplyHeightFilter || !profile.height
+      !shouldApplyHeightFilter
         ? true
         : (() => {
+            if (!profile.height) return true; // No height set → include so we don't hide everyone
             const profileHeightInches = heightStringToInches(profile.height);
-            if (profileHeightInches === null) return false;
+            if (profileHeightInches === null) return true; // Unparseable → include (avoid format bugs hiding matches)
             return profileHeightInches >= heightFilter.min && profileHeightInches <= heightFilter.max;
           })();
 
@@ -941,70 +956,80 @@ export default function HomeScreen({ navigation }) {
 
       {/* Location Input Modal */}
       <Modal visible={locationModal} transparent animationType="slide" onRequestClose={() => setLocationModal(false)}>
-        <View style={styles.sheetOverlay}>
+        <KeyboardAvoidingView
+          style={styles.sheetOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+        >
           <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setLocationModal(false)} />
           <View style={styles.ageSheet}>
-            <View style={styles.sheetHandle} />
-            <Text style={styles.sheetTitle}>Location</Text>
-            <Text style={styles.sheetSubtitle}>Enter a location to filter by</Text>
-            <View style={styles.locationInputContainer}>
-              <TextInput
-                style={styles.locationInputField}
-                placeholder="Enter location (e.g., Mumbai)"
-                placeholderTextColor="#999"
-                value={locationInput}
-                onChangeText={setLocationInput}
-                autoCapitalize="words"
-              />
-              <TouchableOpacity
-                style={styles.locationButton}
-                onPress={async () => {
-                  try {
-                    setGettingLocation(true);
-                    const verified = await getVerifiedLocation();
-                    setLocationInput(verified.location);
-                    Alert.alert('Location Verified', `Location set to: ${verified.location}`);
-                  } catch (error) {
-                    Alert.alert('Error', error.message || 'Failed to get location. Please enable location permissions.');
-                  } finally {
-                    setGettingLocation(false);
-                  }
-                }}
-                disabled={gettingLocation}
-              >
-                {gettingLocation ? (
-                  <ActivityIndicator size="small" color="#10b981" />
-                ) : (
-                  <Ionicons name="locate" size={20} color="#10b981" />
-                )}
-              </TouchableOpacity>
-            </View>
-            <TouchableOpacity
-              style={styles.applyBtn}
-              onPress={() => {
-                if (locationInput && locationInput.trim()) {
-                  setSelectedLocation(locationInput.trim());
-                } else {
-                  setSelectedLocation(null);
-                }
-                setLocationModal(false);
-              }}
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.locationSheetScrollContent}
             >
-              <Text style={styles.applyBtnText}>Apply filter</Text>
-            </TouchableOpacity>
-            {selectedLocation && (
+              <View style={styles.sheetHandle} />
+              <Text style={styles.sheetTitle}>Location</Text>
+              <Text style={styles.sheetSubtitle}>Enter a location to filter by</Text>
+              <View style={styles.locationInputContainer}>
+                <TextInput
+                  style={styles.locationInputField}
+                  placeholder="Enter location (e.g., Mumbai)"
+                  placeholderTextColor="#999"
+                  value={locationInput}
+                  onChangeText={setLocationInput}
+                  autoCapitalize="words"
+                />
+                <TouchableOpacity
+                  style={styles.locationButton}
+                  onPress={async () => {
+                    try {
+                      setGettingLocation(true);
+                      const verified = await getVerifiedLocation();
+                      setLocationInput(verified.location);
+                      Alert.alert('Location Verified', `Location set to: ${verified.location}`);
+                    } catch (error) {
+                      Alert.alert('Error', error.message || 'Failed to get location. Please enable location permissions.');
+                    } finally {
+                      setGettingLocation(false);
+                    }
+                  }}
+                  disabled={gettingLocation}
+                >
+                  {gettingLocation ? (
+                    <ActivityIndicator size="small" color="#10b981" />
+                  ) : (
+                    <Ionicons name="locate" size={20} color="#10b981" />
+                  )}
+                </TouchableOpacity>
+              </View>
               <TouchableOpacity
-                style={styles.clearFilterBtn}
+                style={styles.applyBtn}
                 onPress={() => {
-                  setSelectedLocation(null);
+                  if (locationInput && locationInput.trim()) {
+                    setSelectedLocation(locationInput.trim());
+                  } else {
+                    setSelectedLocation(null);
+                  }
                   setLocationModal(false);
                 }}
               >
-                <Text style={styles.clearFilterText}>Clear filter</Text>
+                <Text style={styles.applyBtnText}>Apply filter</Text>
               </TouchableOpacity>
-            )}
+              {selectedLocation && (
+                <TouchableOpacity
+                  style={styles.clearFilterBtn}
+                  onPress={() => {
+                    setSelectedLocation(null);
+                    setLocationModal(false);
+                  }}
+                >
+                  <Text style={styles.clearFilterText}>Clear filter</Text>
+                </TouchableOpacity>
+              )}
+            </ScrollView>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Gender Preference Modal */}
@@ -1330,7 +1355,8 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 32,
     paddingHorizontal: 24,
     paddingTop: 12,
-    paddingBottom: Platform.OS === 'ios' ? 36 : 24,
+    // Extra bottom padding on Android so "Clear filter" is above system nav bar in all filter modals (Age, Height, Location, Intent, Distance, I'm interested in)
+    paddingBottom: Platform.OS === 'ios' ? 36 : 80,
   },
   sheetHandle: {
     width: 56,
@@ -1505,8 +1531,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#e5e5e5',
     marginLeft: 20,
   },
+  locationSheetScrollContent: {
+    paddingBottom: 12,
+  },
   clearFilterBtn: {
     marginTop: 12,
+    marginBottom: Platform.OS === 'android' ? 12 : 0,
     alignItems: 'center',
   },
   clearFilterText: {
