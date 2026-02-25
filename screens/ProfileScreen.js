@@ -114,8 +114,9 @@ const inchesToFeetInches = (inches) => {
   return `${feet}'${remainingInches}"`;
 };
 
-// Picker option text: black so readable on white dialog (native picker = white background)
-const PICKER_ITEM_COLOR = '#111111';
+// Picker option text color for dropdown options
+// Use white so options are clearly visible on the dark dropdown background
+const PICKER_ITEM_COLOR = '#ffffff';
 
 const badgeDataKeys = [
   { label: 'MBTI', key: 'mbti', icon: 'planet-outline' },

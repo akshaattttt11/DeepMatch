@@ -529,7 +529,7 @@ export default function HomeScreen({ navigation }) {
                     />
                   </View>
                   <Text style={styles.compatibilityScore}>
-                    {profile.compatibility.overall || 0}% Match
+                    {((profile.compatibility.overall ?? 0)).toFixed(2)}% Match
                   </Text>
                 </View>
               )}
