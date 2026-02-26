@@ -226,10 +226,12 @@ class User(db.Model):
     enneagram_type = db.Column(db.Integer)
     zodiac_sign = db.Column(db.String(20))
     
-    # Email verification
+    # Email / identity verification
     is_verified = db.Column(db.Boolean, default=False, nullable=False)
     email_verification_token = db.Column(db.String(100), unique=True, nullable=True)
     verification_token_expiry = db.Column(db.DateTime, nullable=True)
+    # How the user was verified: e.g. 'email', 'digilocker_otp'
+    verification_type = db.Column(db.String(50), nullable=True)
 
 # Helper function to calculate distance between two coordinates using Haversine formula
 def calculate_distance(lat1, lon1, lat2, lon2):
