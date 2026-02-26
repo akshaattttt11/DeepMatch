@@ -513,7 +513,7 @@ export default function HomeScreen({ navigation }) {
               >
               <View style={styles.nameRow}>
                 <Text style={styles.name}>{profile.name || 'Unknown'}</Text>
-                {profile.is_verified && (
+                {profile.digilocker_verified && (
                   <MaterialCommunityIcons
                     name="check-decagram"
                     size={18}

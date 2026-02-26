@@ -279,6 +279,7 @@ export default function ProfileScreen() {
       max_age: backendProfile.max_age ? String(backendProfile.max_age) : '',
       dating_intention: backendProfile.dating_intention || '',
       is_verified: !!backendProfile.is_verified,
+      digilocker_verified: backendProfile.verification_type === 'digilocker_otp',
     };
   };
 
@@ -362,7 +363,7 @@ export default function ProfileScreen() {
         throw new Error(data.error || 'Failed to verify');
       }
       Alert.alert('Success', 'You are now verified!');
-      setProfile(prev => ({ ...prev, is_verified: true }));
+      setProfile(prev => ({ ...prev, digilocker_verified: true }));
       setVerifyModalVisible(false);
     } catch (e) {
       Alert.alert('Error', e.message);
@@ -958,7 +959,7 @@ export default function ProfileScreen() {
         <Text style={styles.bio}>{displayBio}</Text>
       </Animated.View>
       <View style={styles.verifyRow}>
-        {!profile.is_verified ? (
+        {!profile.digilocker_verified ? (
           <TouchableOpacity
             style={styles.verifyBadgeButton}
             onPress={() => {

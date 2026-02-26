@@ -842,6 +842,7 @@ def get_profile():
         'love_language': user.love_language,
         'zodiac_sign': user.zodiac_sign,
         'is_verified': user.is_verified,
+        'verification_type': user.verification_type,
     })
 
 
@@ -1921,6 +1922,7 @@ def get_compatible_matches():
                 'zodiac_sign': zodiac_sign,
                 'photos': json.loads(other_user.photos) if other_user.photos else [],
                 'is_verified': other_user.is_verified,
+                'digilocker_verified': other_user.verification_type == 'digilocker_otp',
                 'compatibility': {
                     'overall': comp.overall_score,
                     'deepmatch': comp.deepmatch_score,
@@ -2314,8 +2316,9 @@ def verify_otp():
             record["attempts"] += 1
             return jsonify({"error": "Invalid OTP"}), 400
 
-        # Success: mark user as verified
+        # Success: mark user as verified via DigiLocker-style OTP
         user.is_verified = True
+        user.verification_type = 'digilocker_otp'
         db.session.commit()
 
         # Clean up OTP
@@ -2324,7 +2327,7 @@ def verify_otp():
         except KeyError:
             pass
 
-        return jsonify({"message": "Verified successfully", "is_verified": True}), 200
+        return jsonify({"message": "Verified successfully", "is_verified": True, "verification_type": user.verification_type}), 200
     except Exception as e:
         print(f"verify_otp error: {e}")
         return jsonify({"error": "Failed to verify OTP"}), 500
