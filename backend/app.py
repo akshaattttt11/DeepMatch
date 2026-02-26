@@ -1931,6 +1931,53 @@ def get_compatible_matches():
                 }
             })
     
+    # If no matches passed all filters, fall back to a broader set so the user
+    # still sees some profiles instead of an empty screen.
+    if not matches:
+        print("DEBUG: No compatible matches after filters - falling back to basic user list")
+        fallback_query = User.query.filter(
+            User.id != user_id,
+            User.is_banned == False
+        )
+        # If current user gender is set, prefer opposite gender in fallback
+        current_gender_fb = (current_user.gender or '').strip().lower()
+        if current_gender_fb in ['male', 'female']:
+            if current_gender_fb == 'male':
+                fallback_query = fallback_query.filter(
+                    (User.gender == 'female') | (User.gender == None)
+                )
+            else:
+                fallback_query = fallback_query.filter(
+                    (User.gender == 'male') | (User.gender == None)
+                )
+
+        fallback_users = fallback_query.limit(20).all()
+        print(f"DEBUG: Fallback user count: {len(fallback_users)}")
+
+        for other_user in fallback_users:
+            zodiac_sign = other_user.zodiac_sign
+            if not zodiac_sign:
+                other_quiz = QuizResult.query.filter_by(user_id=other_user.id).first()
+                if other_quiz:
+                    zodiac_sign = other_quiz.zodiac_sign
+
+            matches.append({
+                'id': other_user.id,
+                'name': f"{other_user.first_name} {other_user.last_name}".strip(),
+                'age': other_user.age,
+                'height': other_user.height,
+                'gender': other_user.gender,
+                'bio': other_user.bio,
+                'location': other_user.location,
+                'profile_picture': other_user.profile_picture,
+                'intention': other_user.dating_intention,
+                'zodiac_sign': zodiac_sign,
+                'photos': json.loads(other_user.photos) if other_user.photos else [],
+                'is_verified': other_user.is_verified,
+                'digilocker_verified': other_user.verification_type == 'digilocker_otp',
+                'compatibility': None,
+            })
+
     print(f"DEBUG: Returning {len(matches)} matches")
     return jsonify({'matches': matches})
 

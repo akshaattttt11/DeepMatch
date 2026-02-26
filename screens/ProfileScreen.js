@@ -364,6 +364,14 @@ export default function ProfileScreen() {
       }
       Alert.alert('Success', 'You are now verified!');
       setProfile(prev => ({ ...prev, digilocker_verified: true }));
+      try {
+        await simpleService.updateProfile({
+          ...(await simpleService.getProfile() || {}),
+          verification_type: 'digilocker_otp',
+        });
+      } catch (e) {
+        console.log('SimpleService update after OTP failed:', e);
+      }
       setVerifyModalVisible(false);
     } catch (e) {
       Alert.alert('Error', e.message);
