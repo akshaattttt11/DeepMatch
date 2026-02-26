@@ -26,3 +26,21 @@ def send_verification_email_resend(to_email, username, token):
         """
     })
     return True
+
+
+def send_otp_email(to_email: str, otp: str) -> bool:
+    """
+    Send a short-lived numeric OTP to the user for DigiLocker-style verification.
+    """
+    resend.Emails.send({
+        "from": FROM_EMAIL,
+        "to": to_email,
+        "subject": "Your DeepMatch verification code",
+        "html": f"""
+        <h2>Your DeepMatch OTP</h2>
+        <p>Use the code below to verify your identity:</p>
+        <p style="font-size: 24px; font-weight: 700; letter-spacing: 4px;">{otp}</p>
+        <p>This code will expire in 5 minutes. If you didn't request it, you can safely ignore this email.</p>
+        """
+    })
+    return True

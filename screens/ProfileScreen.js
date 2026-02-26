@@ -37,6 +37,7 @@ const initialProfile = {
   min_age: '',
   max_age: '',
   dating_intention: '',
+  is_verified: false,
 };
 
 const MBTI_OPTIONS = [
@@ -146,6 +147,11 @@ export default function ProfileScreen() {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const currentImageIndexRef = useRef(0);
   const imageViewerFlatListRef = useRef(null);
+
+  const [verifyModalVisible, setVerifyModalVisible] = useState(false);
+  const [otp, setOtp] = useState('');
+  const [otpStep, setOtpStep] = useState('form'); // 'form' | 'otp'
+  const [otpLoading, setOtpLoading] = useState(false);
 
   // Initialize services and load profile
   useEffect(() => {
@@ -265,6 +271,7 @@ export default function ProfileScreen() {
       min_age: backendProfile.min_age ? String(backendProfile.min_age) : '',
       max_age: backendProfile.max_age ? String(backendProfile.max_age) : '',
       dating_intention: backendProfile.dating_intention || '',
+      is_verified: !!backendProfile.is_verified,
     };
   };
 
@@ -305,6 +312,56 @@ export default function ProfileScreen() {
     setEditProfile(profile);
     setIsBlurred(true);
     setModalVisible(true);
+  };
+
+  const sendOtp = async () => {
+    try {
+      setOtpLoading(true);
+      const token = await AsyncStorage.getItem('auth_token');
+      const res = await fetch(`${API_BASE_URL}/api/send-otp`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to send OTP');
+      }
+      Alert.alert('OTP Sent', 'Check your email for the verification code.');
+      setOtpStep('otp');
+    } catch (e) {
+      Alert.alert('Error', e.message);
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const verifyOtp = async () => {
+    try {
+      setOtpLoading(true);
+      const token = await AsyncStorage.getItem('auth_token');
+      const res = await fetch(`${API_BASE_URL}/api/verify-otp`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ otp }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to verify');
+      }
+      Alert.alert('Success', 'You are now verified!');
+      setProfile(prev => ({ ...prev, is_verified: true }));
+      setVerifyModalVisible(false);
+    } catch (e) {
+      Alert.alert('Error', e.message);
+    } finally {
+      setOtpLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -893,6 +950,25 @@ export default function ProfileScreen() {
         <Text style={styles.location}><Ionicons name="location" size={16} color="#a3a3a3" /> {displayLocation}</Text>
         <Text style={styles.bio}>{displayBio}</Text>
       </Animated.View>
+      <View style={styles.verifyRow}>
+        {!profile.is_verified ? (
+          <TouchableOpacity
+            style={styles.verifyBadgeButton}
+            onPress={() => {
+              setOtp('');
+              setOtpStep('form');
+              setVerifyModalVisible(true);
+            }}
+          >
+            <Text style={styles.verifyBadgeButtonText}>Verify with DigiLocker</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.verifiedBadge}>
+            <Ionicons name="checkmark-circle" size={16} color="#10b981" />
+            <Text style={styles.verifiedBadgeText}>Verified</Text>
+          </View>
+        )}
+      </View>
       <Animated.View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', marginTop: 18, opacity: badgesAnim }}>
         {badgeDataKeys.map((badge, idx) => (
           <View key={badge.label} style={[styles.badge, { backgroundColor: `rgba(16,185,129,${0.15 + idx * 0.1})` }]}>
@@ -1272,6 +1348,60 @@ export default function ProfileScreen() {
         </View>
       </Modal>
 
+      <Modal
+        visible={verifyModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setVerifyModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.verifyModalCard}>
+            {otpStep === 'form' ? (
+              <>
+                <Text style={styles.verifyTitle}>Verify with DigiLocker</Text>
+                <Text style={styles.verifySubtitle}>
+                  We&apos;ll send a 6‑digit OTP to your registered email: {profile.email || 'your email'}
+                </Text>
+                <TouchableOpacity
+                  style={styles.applyBtn}
+                  onPress={sendOtp}
+                  disabled={otpLoading}
+                >
+                  <Text style={styles.applyBtnText}>
+                    {otpLoading ? 'Sending...' : 'Send OTP'}
+                  </Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <Text style={styles.verifyTitle}>Enter OTP</Text>
+                <TextInput
+                  style={styles.input}
+                  value={otp}
+                  onChangeText={setOtp}
+                  keyboardType="number-pad"
+                  maxLength={6}
+                  placeholder="123456"
+                  placeholderTextColor="#a3a3a3"
+                />
+                <TouchableOpacity
+                  style={styles.applyBtn}
+                  onPress={verifyOtp}
+                  disabled={otpLoading || otp.length !== 6}
+                >
+                  <Text style={styles.applyBtnText}>
+                    {otpLoading ? 'Verifying...' : 'Verify'}
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
+            <TouchableOpacity onPress={() => setVerifyModalVisible(false)}>
+              <Text style={styles.clearFilterText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {/* Bottom Navigation Bar: Home | Matches | Tips */}
       <View style={styles.bottomBarContainer}>
         <View style={styles.bottomBar}>
@@ -1572,6 +1702,62 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '700',
     fontSize: 16,
+  },
+  verifyRow: {
+    marginTop: 10,
+    alignItems: 'center',
+  },
+  verifyBadgeButton: {
+    marginTop: 6,
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#10b981',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  verifyBadgeButtonText: {
+    color: '#10b981',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  verifiedBadge: {
+    marginTop: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: 'rgba(16,185,129,0.12)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  verifiedBadgeText: {
+    color: '#bbf7d0',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  verifyModalCard: {
+    width: '90%',
+    maxWidth: 420,
+    backgroundColor: '#18181b',
+    borderRadius: 20,
+    padding: 20,
+    alignItems: 'stretch',
+  },
+  verifyTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  verifySubtitle: {
+    color: '#d4d4d8',
+    fontSize: 14,
+    marginBottom: 16,
+    textAlign: 'center',
   },
   bottomBarContainer: {
     backgroundColor: '#18181b',

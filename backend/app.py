@@ -12,11 +12,12 @@ import json
 import smtplib
 from email.message import EmailMessage
 import random
+import time
 import math
 import secrets
 from flask_socketio import SocketIO, emit, join_room, leave_room, rooms
 import pytz
-from email_service import send_verification_email_resend
+from email_service import send_verification_email_resend, send_otp_email
 
 import logging
 import threading
@@ -451,6 +452,11 @@ def send_verification_email(user_email, username, token):
         return False
 
 
+# In-memory store for short-lived OTP codes used for DigiLocker-style verification.
+# NOTE: This will be cleared on server restart and does not work across multiple workers.
+otp_store = {}
+
+
 def send_admin_notification(reporter_id, reported_user_id, reason, report_id=None):
     """Notify admin email about a new report. Attempts SMTP if configured, otherwise logs."""
     admin_email = os.environ.get("ADMIN_EMAIL", "deepmatch.noreply@gmail.com")
@@ -835,6 +841,7 @@ def get_profile():
         'enneagram_type': user.enneagram_type,
         'love_language': user.love_language,
         'zodiac_sign': user.zodiac_sign,
+        'is_verified': user.is_verified,
     })
 
 
@@ -2211,6 +2218,115 @@ def resend_verification():
     except Exception as e:
         print(f'Resend verification error: {str(e)}')
         return jsonify({'error': 'An error occurred. Please try again.'}), 500
+
+
+# DigiLocker-style OTP verification endpoints
+@app.route('/api/send-otp', methods=['POST'])
+def send_otp():
+    """
+    Send a 6-digit OTP to the currently authenticated user's email.
+    Used for simulated DigiLocker verification.
+    """
+    try:
+        token = request.headers.get("Authorization", "").replace("Bearer ", "")
+        user_id = verify_token(token)
+
+        if not user_id:
+            return jsonify({"error": "Invalid token"}), 401
+
+        user = db.session.get(User, user_id)
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        email = user.email
+        if not email:
+            return jsonify({"error": "User does not have an email set"}), 400
+
+        now = time.time()
+        record = otp_store.get(email)
+
+        # Simple resend cooldown: 45 seconds
+        if record and now < record.get("next_allowed", 0):
+            seconds_left = int(record["next_allowed"] - now)
+            return jsonify({"error": f"Please wait {seconds_left}s before requesting a new OTP"}), 429
+
+        otp = f"{random.randint(100000, 999999)}"
+
+        otp_store[email] = {
+            "otp": otp,
+            "expires": now + 300,  # 5 minutes
+            "attempts": 0,
+            "next_allowed": now + 45,
+        }
+
+        try:
+            send_otp_email(email, otp)
+        except Exception as e:
+            print(f"OTP email error for {email}: {e}")
+            return jsonify({"error": "Failed to send OTP"}), 500
+
+        return jsonify({"message": "OTP sent"}), 200
+    except Exception as e:
+        print(f"send_otp error: {e}")
+        return jsonify({"error": "Failed to send OTP"}), 500
+
+
+@app.route('/api/verify-otp', methods=['POST'])
+def verify_otp():
+    """
+    Verify a previously sent OTP and mark the user as verified.
+    """
+    try:
+        token = request.headers.get("Authorization", "").replace("Bearer ", "")
+        user_id = verify_token(token)
+
+        if not user_id:
+            return jsonify({"error": "Invalid token"}), 401
+
+        user = db.session.get(User, user_id)
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        data = request.get_json() or {}
+        user_otp = str(data.get("otp", "")).strip()
+
+        if not user_otp:
+            return jsonify({"error": "OTP is required"}), 400
+
+        email = user.email
+        record = otp_store.get(email)
+
+        if not record:
+            return jsonify({"error": "No OTP found. Please request a new one."}), 400
+
+        now = time.time()
+        if now > record["expires"]:
+            del otp_store[email]
+            return jsonify({"error": "OTP expired. Please request a new one."}), 400
+
+        # Limit attempts to 3
+        if record["attempts"] >= 3:
+            del otp_store[email]
+            return jsonify({"error": "Too many incorrect attempts. Please request a new OTP."}), 400
+
+        if record["otp"] != user_otp:
+            record["attempts"] += 1
+            return jsonify({"error": "Invalid OTP"}), 400
+
+        # Success: mark user as verified
+        user.is_verified = True
+        db.session.commit()
+
+        # Clean up OTP
+        try:
+            del otp_store[email]
+        except KeyError:
+            pass
+
+        return jsonify({"message": "Verified successfully", "is_verified": True}), 200
+    except Exception as e:
+        print(f"verify_otp error: {e}")
+        return jsonify({"error": "Failed to verify OTP"}), 500
 
 # =============================
 # 🚨 REPORT USER
