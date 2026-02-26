@@ -1785,25 +1785,28 @@ def get_compatible_matches():
                                 zodiac_sign_str_test not in ['none', 'null', 'undefined', ''])
     print(f"DEBUG: Will apply zodiac filter: {should_filter_zodiac_test} (zodiac_sign_str: '{zodiac_sign_str_test}')")
 
-    # Ensure current user has a quiz result
+    # Ensure current user has a quiz result (optional)
     current_quiz = QuizResult.query.filter_by(user_id=user_id).first()
-    if not current_quiz:
-        return jsonify({'matches': [], 'message': 'Please complete the compatibility quiz first'})
-    
-    # Recalculate compatibilities to ensure scores are up-to-date
-    calculate_all_compatibilities(user_id)
 
-    # Calculate compatibility scores if they don't exist
-    # This ensures users see matches even if compatibility wasn't pre-calculated
-    existing_compatibilities = CompatibilityScore.query.filter_by(user1_id=user_id).count()
-    if existing_compatibilities == 0:
-        # No compatibility scores exist, calculate them now
+    if current_quiz:
+        # Recalculate compatibilities to ensure scores are up-to-date
         calculate_all_compatibilities(user_id)
-    
-    # Get compatibility scores for current user with gender filtering
-    compatibilities = CompatibilityScore.query.filter_by(user1_id=user_id).order_by(
-        CompatibilityScore.overall_score.desc()
-    ).limit(50).all()  # Increased limit to ensure we have enough matches after filtering
+
+        # Calculate compatibility scores if they don't exist
+        # This ensures users see matches even if compatibility wasn't pre-calculated
+        existing_compatibilities = CompatibilityScore.query.filter_by(user1_id=user_id).count()
+        if existing_compatibilities == 0:
+            # No compatibility scores exist, calculate them now
+            calculate_all_compatibilities(user_id)
+        
+        # Get compatibility scores for current user with gender filtering
+        compatibilities = CompatibilityScore.query.filter_by(user1_id=user_id).order_by(
+            CompatibilityScore.overall_score.desc()
+        ).limit(50).all()  # Increased limit to ensure we have enough matches after filtering
+    else:
+        # No quiz yet: skip compatibility scores and rely entirely on the fallback list below
+        print(f"DEBUG: User {user_id} has no quiz result; skipping compatibility and using fallback users")
+        compatibilities = []
     
     print(f"DEBUG: Found {len(compatibilities)} compatibility scores for user {user_id}")
     print(f"DEBUG: Current user gender: '{current_user.gender}'")

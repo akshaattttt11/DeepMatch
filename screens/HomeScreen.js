@@ -189,7 +189,9 @@ export default function HomeScreen({ navigation }) {
         console.log('📸 Profile pictures from backend:', data.matches?.map(m => ({ name: m.name, profile_picture: m.profile_picture })));
         setProfiles(data.matches || []);
       } else {
-        console.error('Failed to load matches');
+        const text = await response.text();
+        console.error('Failed to load matches', response.status, text);
+        Alert.alert('Error', `Failed to load matches (${response.status})`);
         // Fallback to empty array
         setProfiles([]);
       }
