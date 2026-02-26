@@ -510,8 +510,18 @@ export default function HomeScreen({ navigation }) {
               <TouchableOpacity
                 activeOpacity={1}
                 onPress={() => navigation.navigate('ProfileDetail', { userId: profile.id })}
-            >
-              <Text style={styles.name}>{profile.name || 'Unknown'}</Text>
+              >
+              <View style={styles.nameRow}>
+                <Text style={styles.name}>{profile.name || 'Unknown'}</Text>
+                {profile.is_verified && (
+                  <MaterialCommunityIcons
+                    name="check-decagram"
+                    size={18}
+                    color="#0095F6"
+                    style={{ marginLeft: 6, marginTop: 2 }}
+                  />
+                )}
+              </View>
               <Text style={[styles.status, { marginBottom: 12 }]}>
                 {profile.age || 'N/A'} • {profile.location || 'Unknown Location'}
               </Text>
@@ -1224,6 +1234,11 @@ const styles = StyleSheet.create({
   },
   name: { fontSize: 28, fontWeight: 'bold', color: '#fff', textAlign: 'center' },
   status: { color: '#bbb', marginBottom: 10, textAlign: 'center' },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   profileImage: Platform.select({
     web: {
       width: '100%',

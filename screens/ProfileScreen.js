@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, Modal, TextInput, Animated, Easing, Dimensions, SafeAreaView, Alert, ActivityIndicator, KeyboardAvoidingView, ScrollView, Platform, FlatList } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { BlurView } from 'expo-blur';
@@ -152,6 +153,12 @@ export default function ProfileScreen() {
   const [otp, setOtp] = useState('');
   const [otpStep, setOtpStep] = useState('form'); // 'form' | 'otp'
   const [otpLoading, setOtpLoading] = useState(false);
+  const [digilockerName, setDigilockerName] = useState('');
+  const [digilockerDob, setDigilockerDob] = useState('');
+  const [aadhaarLast4, setAadhaarLast4] = useState('');
+  const [digilockerEmail, setDigilockerEmail] = useState('');
+  const [showDobPicker, setShowDobPicker] = useState(false);
+  const [dobDate, setDobDate] = useState(null);
 
   // Initialize services and load profile
   useEffect(() => {
@@ -957,9 +964,15 @@ export default function ProfileScreen() {
             onPress={() => {
               setOtp('');
               setOtpStep('form');
+              const fullName = `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || profile.username || '';
+              setDigilockerName(fullName);
+              setDigilockerDob('');
+              setAadhaarLast4('');
+              setDigilockerEmail(profile.email || '');
               setVerifyModalVisible(true);
             }}
           >
+            <MaterialCommunityIcons name="cloud-lock-outline" size={18} color="#fff" />
             <Text style={styles.verifyBadgeButtonText}>Verify with DigiLocker</Text>
           </TouchableOpacity>
         ) : (
@@ -1130,7 +1143,7 @@ export default function ProfileScreen() {
         </TouchableOpacity>
       </Animated.View>
 
-      <Animated.View style={{ position: 'absolute', bottom: 60, left: 0, right: 0, alignItems: 'center', opacity: logoutAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0.5] }) }}>
+      <Animated.View style={{ position: 'absolute', bottom: 15, left: 0, right: 0, alignItems: 'center', opacity: logoutAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0.5] }) }}>
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout} activeOpacity={0.8}>
           <Ionicons name="log-out-outline" size={20} color="#ef4444" />
           <Text style={styles.logoutText}>Logout</Text>
@@ -1354,18 +1367,85 @@ export default function ProfileScreen() {
         animationType="slide"
         onRequestClose={() => setVerifyModalVisible(false)}
       >
-        <View style={styles.modalOverlay}>
+        <View style={styles.verifyModalOverlay}>
           <View style={styles.verifyModalCard}>
             {otpStep === 'form' ? (
               <>
                 <Text style={styles.verifyTitle}>Verify with DigiLocker</Text>
                 <Text style={styles.verifySubtitle}>
-                  We&apos;ll send a 6‑digit OTP to your registered email: {profile.email || 'your email'}
+                  Enter your details and we&apos;ll send a 6‑digit OTP to your registered email.
                 </Text>
+                <TextInput
+                  style={styles.input}
+                  value={digilockerName}
+                  onChangeText={setDigilockerName}
+                  placeholder="Full Name (as per ID)"
+                  placeholderTextColor="#a3a3a3"
+                />
                 <TouchableOpacity
-                  style={styles.applyBtn}
+                  activeOpacity={0.8}
+                  onPress={() => setShowDobPicker(true)}
+                >
+                  <TextInput
+                    style={styles.input}
+                    value={digilockerDob}
+                    editable={false}
+                    placeholder="Date of Birth (DD/MM/YYYY)"
+                    placeholderTextColor="#a3a3a3"
+                  />
+                </TouchableOpacity>
+                {showDobPicker && (
+                  <DateTimePicker
+                    value={dobDate || new Date(2005, 0, 1)}
+                    mode="date"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    maximumDate={new Date()}
+                    onChange={(event, date) => {
+                      if (Platform.OS === 'android') {
+                        setShowDobPicker(false);
+                      }
+                      if (date) {
+                        setDobDate(date);
+                        const d = date;
+                        const day = String(d.getDate()).padStart(2, '0');
+                        const month = String(d.getMonth() + 1).padStart(2, '0');
+                        const year = d.getFullYear();
+                        setDigilockerDob(`${day}/${month}/${year}`);
+                      }
+                    }}
+                  />
+                )}
+                <TextInput
+                  style={styles.input}
+                  value={aadhaarLast4}
+                  onChangeText={text => {
+                    const cleaned = text.replace(/[^0-9]/g, '').slice(0, 4);
+                    setAadhaarLast4(cleaned);
+                  }}
+                  keyboardType="number-pad"
+                  maxLength={4}
+                  placeholder="Aadhaar last 4 digits"
+                  placeholderTextColor="#a3a3a3"
+                />
+                <TextInput
+                  style={styles.input}
+                  value={digilockerEmail}
+                  onChangeText={setDigilockerEmail}
+                  placeholder="Email"
+                  placeholderTextColor="#a3a3a3"
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                />
+                <TouchableOpacity
+                  style={[styles.applyBtn, styles.verifyApplyBtn]}
                   onPress={sendOtp}
-                  disabled={otpLoading}
+                  disabled={
+                    otpLoading ||
+                    !digilockerName.trim() ||
+                    !digilockerDob.trim() ||
+                    aadhaarLast4.length !== 4 ||
+                    !digilockerEmail.trim()
+                  }
                 >
                   <Text style={styles.applyBtnText}>
                     {otpLoading ? 'Sending...' : 'Send OTP'}
@@ -1385,7 +1465,7 @@ export default function ProfileScreen() {
                   placeholderTextColor="#a3a3a3"
                 />
                 <TouchableOpacity
-                  style={styles.applyBtn}
+                  style={[styles.applyBtn, styles.verifyApplyBtn]}
                   onPress={verifyOtp}
                   disabled={otpLoading || otp.length !== 6}
                 >
@@ -1507,7 +1587,7 @@ const styles = StyleSheet.create({
   editButtonContainer: {
     position: 'absolute',
     bottom: 70,
-    right: 30,
+    right: 16,
     zIndex: 10,
     shadowColor: '#10b981',
     shadowOffset: { width: 0, height: 4 },
@@ -1525,7 +1605,7 @@ const styles = StyleSheet.create({
   },
   quizButtonContainer: {
     position: 'absolute',
-    bottom: 190,
+    bottom: 140,
     left: 0,
     right: 0,
     alignItems: 'center',
@@ -1533,7 +1613,7 @@ const styles = StyleSheet.create({
   },
   blockedUsersButtonContainer: {
     position: 'absolute',
-    bottom: 130,
+    bottom: 80,
     left: 0,
     right: 0,
     alignItems: 'center',
@@ -1703,23 +1783,34 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 16,
   },
+    applyBtn: {
+    backgroundColor: '#10b981',
+    borderRadius: 20,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  applyBtnText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 16,
+  },
   verifyRow: {
-    marginTop: 10,
+    marginTop: 16,
     alignItems: 'center',
   },
   verifyBadgeButton: {
     marginTop: 6,
-    paddingHorizontal: 18,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#10b981',
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: '#5647cb',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
   },
   verifyBadgeButtonText: {
-    color: '#10b981',
+    color: '#ffffff',
     fontWeight: '600',
     fontSize: 14,
   },
@@ -1746,6 +1837,15 @@ const styles = StyleSheet.create({
     padding: 20,
     alignItems: 'stretch',
   },
+  verifyModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(24,24,27,0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  verifyApplyBtn: {
+    marginTop: 16,
+  },
   verifyTitle: {
     color: '#fff',
     fontSize: 18,
@@ -1757,6 +1857,12 @@ const styles = StyleSheet.create({
     color: '#d4d4d8',
     fontSize: 14,
     marginBottom: 16,
+    textAlign: 'center',
+  },
+  clearFilterText: {
+    color: '#a3a3a3',
+    fontSize: 14,
+    marginTop: 12,
     textAlign: 'center',
   },
   bottomBarContainer: {

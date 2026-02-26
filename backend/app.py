@@ -1920,6 +1920,7 @@ def get_compatible_matches():
                 'intention': other_user.dating_intention,
                 'zodiac_sign': zodiac_sign,
                 'photos': json.loads(other_user.photos) if other_user.photos else [],
+                'is_verified': other_user.is_verified,
                 'compatibility': {
                     'overall': comp.overall_score,
                     'deepmatch': comp.deepmatch_score,
