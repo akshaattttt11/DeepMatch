@@ -1059,10 +1059,10 @@ export default function HomeScreen({ navigation }) {
                 style={styles.sheetPicker}
                 dropdownIconColor="#000"
               >
-                <Picker.Item label="Open to all" value={null} color="#555" />
-                <Picker.Item label="Men" value="male" color="#111" />
-                <Picker.Item label="Women" value="female" color="#111" />
-                <Picker.Item label="Both" value="both" color="#111" />
+                <Picker.Item label="Open to all" value={null} color="#fff" />
+                <Picker.Item label="Men" value="male" color="#fff" />
+                <Picker.Item label="Women" value="female" color="#fff" />
+                <Picker.Item label="Both" value="both" color="#fff" />
             </Picker>
             </View>
             <TouchableOpacity
@@ -1103,13 +1103,13 @@ export default function HomeScreen({ navigation }) {
                 style={styles.sheetPicker}
                 dropdownIconColor="#000"
               >
-                <Picker.Item label="Open to all" value={null} color="#555" />
+                <Picker.Item label="Open to all" value={null} color="#fff" />
                 {distances.map(dist => (
                   <Picker.Item 
                     key={dist} 
                     label={`${dist} mi${dist >= 100 ? '+' : ''}`} 
                     value={dist} 
-                    color="#111" 
+                    color="#fff" 
                   />
               ))}
             </Picker>
@@ -1155,9 +1155,9 @@ export default function HomeScreen({ navigation }) {
                 style={styles.sheetPicker}
                 dropdownIconColor="#000"
               >
-                <Picker.Item label="All intentions" value={null} color="#555" />
+                <Picker.Item label="All intentions" value={null} color="#fff" />
                 {intentions.map(intent => (
-                  <Picker.Item key={intent} label={intent} value={intent} color="#111" />
+                  <Picker.Item key={intent} label={intent} value={intent} color="#fff" />
                 ))}
             </Picker>
             </View>
