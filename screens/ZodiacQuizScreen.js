@@ -346,7 +346,7 @@ export default function ZodiacQuizScreen({ navigation }) {
       console.error('Failed to sync zodiac quiz completion:', err);
     }
   })();
-  navigation.replace('MainTabs');
+  navigation.replace('MainTabs', { screen: 'Home' });
 }, 4000);
 
  // Give more time to view the animation

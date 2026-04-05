@@ -503,7 +503,7 @@ export default function QuizScreen({ navigation }) {
       }).start(() => {
     setTimeout(() => {
     setShowConfetti(false);
-    navigation.replace('MainTabs'); // ✅ GO HOME
+    navigation.replace('MainTabs', { screen: 'Home' });
   }, 2000);
 });
     }, 1200);
