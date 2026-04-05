@@ -259,6 +259,8 @@ class SimpleService {
       // Clear current user session but keep their profile
       // Only clear session-specific data
       const keysToRemove = [
+        'auth_token',
+        'current_user',
         'users_list',
         'user_matches',
         'user_likes',

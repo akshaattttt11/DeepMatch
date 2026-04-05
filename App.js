@@ -5,6 +5,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { Provider as PaperProvider } from 'react-native-paper';
+import simpleService from './services/simpleService';
 
 import HomeScreen from './screens/HomeScreen';
 import ProfileScreen from './screens/ProfileScreen';
@@ -20,6 +21,9 @@ import AdminReportsScreen from './screens/AdminReportsScreen';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
+
+// Must match screens/LoginScreen.js admin routing
+const ADMIN_EMAIL = 'deepmatch.noreply@gmail.com';
 
 function MainTabs() {
     return (
@@ -38,21 +42,66 @@ function MainTabs() {
 }
 
 export default function App() {
-  const [quizDone, setQuizDone] = useState(null);
+  const [bootstrap, setBootstrap] = useState(null);
 
   useEffect(() => {
     (async () => {
-      const quiz = await AsyncStorage.getItem('user_quiz_results');
-      setQuizDone(!!quiz);
+      let initialRouteName = 'Login';
+      let mainTabsInitialParams = undefined;
+
+      try {
+        const [token, userJson] = await Promise.all([
+          AsyncStorage.getItem('auth_token'),
+          AsyncStorage.getItem('current_user'),
+        ]);
+
+        const hasSession = token != null && String(token).trim().length > 0;
+        if (hasSession && userJson) {
+          const user = JSON.parse(userJson);
+          const userEmail = (user.email || '').toLowerCase();
+          const isAdmin =
+            userEmail === ADMIN_EMAIL.toLowerCase() || user.is_admin;
+
+          if (user.email) {
+            simpleService.setCurrentUser(user.email);
+          }
+
+          if (isAdmin) {
+            initialRouteName = 'AdminReports';
+          } else {
+            initialRouteName = 'MainTabs';
+            mainTabsInitialParams = { screen: 'Profile' };
+          }
+        } else if (hasSession) {
+          initialRouteName = 'MainTabs';
+          mainTabsInitialParams = { screen: 'Profile' };
+        }
+
+        setBootstrap({
+          initialRouteName,
+          mainTabsInitialParams,
+        });
+      } catch (e) {
+        console.warn('App bootstrap failed:', e);
+        setBootstrap({
+          initialRouteName: 'Login',
+          mainTabsInitialParams: undefined,
+        });
+      }
     })();
   }, []);
 
-  if (quizDone === null) return null; // or a splash/loading screen
+  if (bootstrap === null) return null;
+
+  const { initialRouteName, mainTabsInitialParams } = bootstrap;
 
   return (
     <PaperProvider>
       <NavigationContainer>
-        <Stack.Navigator screenOptions={{ headerShown: false }}>
+        <Stack.Navigator
+          initialRouteName={initialRouteName}
+          screenOptions={{ headerShown: false }}
+        >
           <Stack.Screen name="Login" component={LoginScreen} />
           <Stack.Screen name="Signup" component={SignupScreen} />
           <Stack.Screen name="Quiz" component={QuizScreen} />
@@ -61,6 +110,7 @@ export default function App() {
             name="MainTabs"
             component={MainTabs}
             options={{ gestureEnabled: false }}
+            initialParams={mainTabsInitialParams}
           />
           <Stack.Screen name="ProfileDetail" component={ProfileDetailScreen} />
           <Stack.Screen name="BlockedUsers" component={BlockedUsersScreen} />
