@@ -1116,17 +1116,14 @@ export default function ProfileScreen() {
         </View>
       </Modal>
 
-      <Animated.View style={[styles.editButtonContainer, { opacity: editAnim, transform: [{ scale: editAnim }] }]}>
-        <TouchableOpacity style={styles.editButton} onPress={openEditModal} activeOpacity={0.85}>
-          <MaterialIcons name="edit" size={24} color="#fff" />
-        </TouchableOpacity>
-      </Animated.View>
-      
-      {/* Take Quiz Button */}
-      <Animated.View style={[styles.quizButtonContainer, { opacity: editAnim, transform: [{ scale: editAnim }] }]}>
-        <TouchableOpacity 
-          style={styles.quizButton} 
-          onPress={() => navigation.navigate('Quiz')} 
+      {/* Take Quiz — box-none so empty horizontal space does not steal taps from Edit FAB */}
+      <Animated.View
+        pointerEvents="box-none"
+        style={[styles.quizButtonContainer, { opacity: editAnim, transform: [{ scale: editAnim }] }]}
+      >
+        <TouchableOpacity
+          style={styles.quizButton}
+          onPress={() => navigation.navigate('Quiz')}
           activeOpacity={0.85}
         >
           <Ionicons name="flask" size={24} color="#fff" />
@@ -1135,9 +1132,12 @@ export default function ProfileScreen() {
       </Animated.View>
 
       {/* 🧩 BLOCKED USERS BUTTON */}
-      <Animated.View style={[styles.blockedUsersButtonContainer, { opacity: editAnim, transform: [{ scale: editAnim }] }]}>
+      <Animated.View
+        pointerEvents="box-none"
+        style={[styles.blockedUsersButtonContainer, { opacity: editAnim, transform: [{ scale: editAnim }] }]}
+      >
         <TouchableOpacity
-          onPress={() => navigation.navigate("BlockedUsers")}
+          onPress={() => navigation.navigate('BlockedUsers')}
           style={styles.blockedUsersButton}
           activeOpacity={0.8}
         >
@@ -1152,13 +1152,21 @@ export default function ProfileScreen() {
         </TouchableOpacity>
       </Animated.View>
 
-      <Animated.View style={{ position: 'absolute', bottom: 15, left: 0, right: 0, alignItems: 'center', opacity: logoutAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0.5] }) }}>
+      <Animated.View
+        pointerEvents="box-none"
+        style={{ position: 'absolute', bottom: 15, left: 0, right: 0, alignItems: 'center', opacity: logoutAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0.5] }) }}
+      >
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout} activeOpacity={0.8}>
           <Ionicons name="log-out-outline" size={20} color="#ef4444" />
           <Text style={styles.logoutText}>Logout</Text>
         </TouchableOpacity>
-        {/* Debug button removed as requested */}
+      </Animated.View>
 
+      {/* Edit FAB rendered last + higher z-index so it wins touch hits over full-width rows */}
+      <Animated.View style={[styles.editButtonContainer, { opacity: editAnim, transform: [{ scale: editAnim }] }]}>
+        <TouchableOpacity style={styles.editButton} onPress={openEditModal} activeOpacity={0.85}>
+          <MaterialIcons name="edit" size={24} color="#fff" />
+        </TouchableOpacity>
       </Animated.View>
       </View>
 
@@ -1597,12 +1605,12 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 70,
     right: 16,
-    zIndex: 10,
+    zIndex: 50,
     shadowColor: '#10b981',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
-    elevation: 8,
+    elevation: 16,
   },
   editButton: {
     backgroundColor: '#10b981',
@@ -1618,7 +1626,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     alignItems: 'center',
-    zIndex: 10,
+    zIndex: 5,
   },
   blockedUsersButtonContainer: {
     position: 'absolute',
@@ -1626,7 +1634,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     alignItems: 'center',
-    zIndex: 10,
+    zIndex: 5,
   },
   blockedUsersButton: {
     flexDirection: 'row',
